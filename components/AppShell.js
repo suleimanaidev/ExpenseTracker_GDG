@@ -6,7 +6,7 @@ import { DataProvider } from '@/lib/DataContext';
 export default function AppShell({ children }) {
   return (
     <DataProvider>
-      <div className="app-layout">
+      <div className="app-layout" suppressHydrationWarning={true}>
         <Sidebar />
         <main className="main-content" id="main-content">
           {children}
