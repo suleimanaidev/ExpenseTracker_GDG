@@ -1,15 +1,11 @@
 {
-  "name": "ledger",
-  "version": "0.1.0",
+  "name": "expense-tracker-gdg",
+  "version": "1.0.0",
   "private": true,
+  "description": "Ledger — Separated Frontend (Vite) and Backend (Express) Personal Finance Dashboard",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start"
-  },
-  "dependencies": {
-    "next": "latest",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "install:all": "cd frontend && npm install && cd ../backend && npm install",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:backend": "cd backend && npm run dev"
   }
 }
