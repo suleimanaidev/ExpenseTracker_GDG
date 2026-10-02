@@ -1,6 +1,7 @@
 import { useLocation, useNavigate, Link } from 'react-router-dom';
 import { useState } from 'react';
 import { useAuth } from '../lib/AuthContext';
+import ThemeToggleMouse from './ThemeToggleMouse';
 
 const NAV_ITEMS = [
   {
@@ -52,7 +53,7 @@ const NAV_ITEMS = [
   },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ onCollapseChange }) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const { user, signOut, configured, profile } = useAuth();
@@ -61,6 +62,12 @@ export default function Sidebar() {
   const handleLogout = async () => {
     await signOut();
     navigate('/login');
+  };
+
+  const handleToggleCollapse = () => {
+    const next = !collapsed;
+    setCollapsed(next);
+    if (onCollapseChange) onCollapseChange(next);
   };
 
   // Dynamically push Admin item if user has is_admin role
@@ -97,7 +104,7 @@ export default function Sidebar() {
           </div>
           <button
             className="sidebar-toggle"
-            onClick={() => setCollapsed(!collapsed)}
+            onClick={handleToggleCollapse}
             aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -137,6 +144,13 @@ export default function Sidebar() {
               </div>
             </div>
           )}
+
+          {/* Theme Toggle */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: collapsed ? 'center' : 'flex-start', gap: '0.5rem', padding: '0.25rem 0' }}>
+            <ThemeToggleMouse />
+            {!collapsed && <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Toggle Theme</span>}
+          </div>
+
           <button
             onClick={handleLogout}
             className="sidebar-logout-btn"

@@ -2,13 +2,13 @@ import { useState } from 'react';
 import { useData } from '../lib/DataContext';
 import { useAuth } from '../lib/AuthContext';
 import { formatCurrency } from '../lib/categories';
+import api from '../lib/api';
 
 export default function InsightsPage() {
   const {
     loaded, totalSpent, budget, remaining, byCategory,
     monthEntries, daysLeft, currency,
     messages, setMessages, insight, setInsight,
-    getHeaders, API_URL
   } = useData();
   const { user } = useAuth();
 
@@ -23,19 +23,13 @@ export default function InsightsPage() {
     setInsightLoading(true);
     setInsightError('');
     try {
-      const res = await fetch(`${API_URL}/api/insight`, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify({
-          clientData: {
-            budget,
-            currency,
-            entries: monthEntries,
-          },
-        }),
+      const data = await api.post('/api/insight', {
+        clientData: {
+          budget,
+          currency,
+          entries: monthEntries,
+        },
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Request failed');
       setInsight(data.insight);
     } catch (err) {
       setInsightError(err.message || 'Failed to fetch AI spending insight.');
@@ -55,21 +49,15 @@ export default function InsightsPage() {
     setChatLoading(true);
 
     try {
-      const res = await fetch(`${API_URL}/api/insight/chat`, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify({
-          question: q,
-          history: messages.slice(-6).map(m => ({ role: m.role, text: m.text })),
-          clientData: {
-            budget,
-            currency,
-            entries: monthEntries,
-          },
-        }),
+      const data = await api.post('/api/insight/chat', {
+        question: q,
+        history: messages.slice(-6).map(m => ({ role: m.role, text: m.text })),
+        clientData: {
+          budget,
+          currency,
+          entries: monthEntries,
+        },
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Request failed');
       setMessages(prev => [...prev, { role: 'ai', text: data.answers || data.insight }]);
     } catch (err) {
       setMessages(prev => [...prev, { role: 'ai', text: `Error: ${err.message}` }]);

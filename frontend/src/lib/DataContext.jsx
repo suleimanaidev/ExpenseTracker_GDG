@@ -1,13 +1,9 @@
 import { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { DEFAULT_CATEGORIES, uid, getCategoryIcon } from './categories';
 import { useAuth } from './AuthContext';
+import api, { API_URL } from './api';
 
 const DataContext = createContext(null);
-
-const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-const API_URL = isLocal
-  ? `${window.location.protocol}//${window.location.hostname}:5000`
-  : window.location.origin;
 
 const STORAGE_KEYS = {
   entries: 'ledger:entries',
@@ -18,7 +14,7 @@ const STORAGE_KEYS = {
 };
 
 export function DataProvider({ children }) {
-  const { user, session, configured } = useAuth();
+  const { user, configured, refreshProfile } = useAuth();
 
   const [entries, setEntries] = useState([]);
   const [budget, setBudgetState] = useState(50000);
@@ -39,70 +35,59 @@ export function DataProvider({ children }) {
   const [insight, setInsight] = useState('');
   const [apiWarning, setApiWarning] = useState(null);
 
-  // Helper: Get API request headers with auth token
-  const getHeaders = useCallback(() => {
-    const headers = { 'Content-Type': 'application/json' };
-    if (session?.access_token) {
-      headers['Authorization'] = `Bearer ${session.access_token}`;
-    }
-    return headers;
-  }, [session]);
-
-  // ─── Fetch Data from Express Backend or LocalStorage ───
+  // ─── Fetch Data from MERN Backend or LocalStorage ───
   const loadUserData = useCallback(async () => {
     setSyncing(true);
     try {
-      if (configured && user?.id && session?.access_token) {
+      if (configured && user?.id) {
         // 1. Fetch Profile
-        const profileRes = await fetch(`${API_URL}/api/profile`, {
-          headers: getHeaders(),
-        });
-        if (profileRes.ok) {
-          const profile = await profileRes.json();
+        try {
+          const profile = await api.get('/api/profile');
           if (profile) {
-            if (profile.monthly_budget) setBudgetState(parseFloat(profile.monthly_budget));
+            if (profile.monthly_budget !== undefined) setBudgetState(parseFloat(profile.monthly_budget));
+            else if (profile.monthlyBudget !== undefined) setBudgetState(parseFloat(profile.monthlyBudget));
             if (profile.currency) setCurrencyState(profile.currency);
-            setJoinedAt(profile.joined_at || profile.created_at);
+            setJoinedAt(profile.joined_at || profile.createdAt || new Date().toISOString());
           }
+        } catch (pErr) {
+          console.error('Error fetching profile:', pErr);
         }
 
         // 2. Fetch Categories
-        const catRes = await fetch(`${API_URL}/api/categories`, {
-          headers: getHeaders(),
-        });
-        if (catRes.ok) {
-          const dbCategories = await catRes.json();
-          if (dbCategories && dbCategories.length > 0) {
+        try {
+          const dbCategories = await api.get('/api/categories');
+          if (dbCategories && Array.isArray(dbCategories) && dbCategories.length > 0) {
             setCategoriesState(dbCategories.map(c => ({
               id: c.id,
               name: c.name,
               color: c.color || '#00A19B',
-              icon: c.emoji || getCategoryIcon(c.name),
+              icon: c.emoji || c.icon || getCategoryIcon(c.name),
             })));
           }
+        } catch (cErr) {
+          console.error('Error fetching categories:', cErr);
         }
 
         // 3. Fetch Expenses
-        const expRes = await fetch(`${API_URL}/api/expenses`, {
-          headers: getHeaders(),
-        });
-        if (expRes.ok) {
-          const dbExpenses = await expRes.json();
-          if (dbExpenses) {
+        try {
+          const dbExpenses = await api.get('/api/expenses');
+          if (dbExpenses && Array.isArray(dbExpenses)) {
             const loadedEntries = dbExpenses.map(e => ({
               id: e.id,
               amount: parseFloat(e.amount),
               category: e.category,
               category_id: e.category_id,
               note: e.note || '',
-              date: e.spent_at ? e.spent_at.split('T')[0] : new Date().toISOString().split('T')[0],
-              timestamp: e.spent_at || e.created_at,
+              date: e.spent_at ? e.spent_at.split('T')[0] : (e.date ? e.date.split('T')[0] : new Date().toISOString().split('T')[0]),
+              timestamp: e.spent_at || e.date || new Date().toISOString(),
             }));
             setEntries(loadedEntries);
           }
+        } catch (eErr) {
+          console.error('Error fetching expenses:', eErr);
         }
       } else {
-        // LocalStorage fallback for demo/unconfigured mode
+        // LocalStorage fallback for demo/offline mode
         const e = localStorage.getItem(STORAGE_KEYS.entries);
         if (e) setEntries(JSON.parse(e));
         const b = localStorage.getItem(STORAGE_KEYS.budget);
@@ -121,15 +106,11 @@ export function DataProvider({ children }) {
       setLoaded(true);
       setSyncing(false);
     }
-  }, [configured, user, session, getHeaders]);
+  }, [configured, user]);
 
   useEffect(() => {
-    if (session) {
-      loadUserData();
-    } else if (!configured) {
-      loadUserData();
-    }
-  }, [session, configured, loadUserData]);
+    loadUserData();
+  }, [loadUserData]);
 
   // Sync to localStorage as offline cache in demo mode
   useEffect(() => {
@@ -141,7 +122,7 @@ export function DataProvider({ children }) {
     if (joinedAt) localStorage.setItem(STORAGE_KEYS.joinedAt, joinedAt);
   }, [entries, budget, categories, currency, joinedAt, loaded, configured]);
 
-  // ─── Actions ───
+  // ─── Actions with Optimistic Updates & Rollbacks ───
   const addEntry = useCallback(async (amount, category, note, date) => {
     const amtNum = parseFloat(amount);
     const spentDate = date ? new Date(date).toISOString() : new Date().toISOString();
@@ -162,23 +143,16 @@ export function DataProvider({ children }) {
     if (configured && user?.id) {
       try {
         const catObj = categories.find(c => c.name === category);
-        const res = await fetch(`${API_URL}/api/expenses`, {
-          method: 'POST',
-          headers: getHeaders(),
-          body: JSON.stringify({
-            amount: amtNum,
-            category,
-            category_id: catObj?.id || null,
-            note: (note || '').trim(),
-            spent_at: spentDate,
-          }),
+        const result = await api.post('/api/expenses', {
+          amount: amtNum,
+          category,
+          category_id: catObj?.id || null,
+          note: (note || '').trim(),
+          spent_at: spentDate,
         });
 
-        if (res.ok) {
-          const result = await res.json();
-          // Update ID with server-generated ID and check warnings
+        if (result?.expense) {
           setEntries(prev => prev.map(e => e.id === tempId ? { ...e, id: result.expense.id } : e));
-          
           if (result.warning) {
             setApiWarning(result.warning);
           } else {
@@ -186,15 +160,22 @@ export function DataProvider({ children }) {
           }
         }
       } catch (err) {
-        console.error('Failed to save expense to server:', err);
+        console.error('Failed to save expense to server, rolling back:', err);
+        // Rollback optimistic add
+        setEntries(prev => prev.filter(e => e.id !== tempId));
+        throw err;
       }
     }
     return newEntry;
-  }, [configured, user, categories, getHeaders]);
+  }, [configured, user, categories]);
 
   const updateEntry = useCallback(async (id, updates) => {
+    let previousEntries;
     // Optimistic update
-    setEntries(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e));
+    setEntries(prev => {
+      previousEntries = prev;
+      return prev.map(e => e.id === id ? { ...e, ...updates } : e);
+    });
 
     if (configured && user?.id) {
       try {
@@ -204,67 +185,60 @@ export function DataProvider({ children }) {
         if (updates.note !== undefined) payload.note = updates.note;
         if (updates.date !== undefined) payload.spent_at = new Date(updates.date).toISOString();
 
-        const res = await fetch(`${API_URL}/api/expenses/${id}`, {
-          method: 'PUT',
-          headers: getHeaders(),
-          body: JSON.stringify(payload),
-        });
-
-        if (res.ok) {
-          const result = await res.json();
-          if (result.warning) {
-            setApiWarning(result.warning);
-          } else {
-            setApiWarning(null);
-          }
+        const result = await api.put(`/api/expenses/${id}`, payload);
+        if (result?.warning) {
+          setApiWarning(result.warning);
+        } else {
+          setApiWarning(null);
         }
       } catch (err) {
-        console.error('Failed to update expense on server:', err);
+        console.error('Failed to update expense on server, rolling back:', err);
+        setEntries(previousEntries);
+        throw err;
       }
     }
-  }, [configured, user, getHeaders]);
+  }, [configured, user]);
 
   const removeEntry = useCallback(async (id) => {
-    setEntries(prev => prev.filter(e => e.id !== id));
+    let previousEntries;
+    setEntries(prev => {
+      previousEntries = prev;
+      return prev.filter(e => e.id !== id);
+    });
 
     if (configured && user?.id) {
       try {
-        await fetch(`${API_URL}/api/expenses/${id}`, {
-          method: 'DELETE',
-          headers: getHeaders(),
-        });
+        await api.delete(`/api/expenses/${id}`);
       } catch (err) {
-        console.error('Failed to remove expense from server:', err);
+        console.error('Failed to remove expense from server, rolling back:', err);
+        setEntries(previousEntries);
+        throw err;
       }
     }
-  }, [configured, user, getHeaders]);
+  }, [configured, user]);
 
   const setBudget = useCallback(async (val) => {
     const num = parseFloat(val);
     if (num <= 0 || isNaN(num)) return;
+    const prevBudget = budget;
     setBudgetState(num);
 
     if (configured && user?.id) {
       try {
-        const res = await fetch(`${API_URL}/api/settings/budget`, {
-          method: 'PUT',
-          headers: getHeaders(),
-          body: JSON.stringify({ monthly_budget: num }),
-        });
-
-        if (res.ok) {
-          const result = await res.json();
-          if (result.warning) {
-            setApiWarning(result.warning);
-          } else {
-            setApiWarning(null);
-          }
+        const result = await api.put('/api/settings/budget', { monthly_budget: num });
+        if (result?.warning) {
+          setApiWarning(result.warning);
+        } else {
+          setApiWarning(null);
         }
+        if (refreshProfile) refreshProfile();
       } catch (err) {
-        console.error('Failed to set budget on server:', err);
+        console.error('Failed to set budget on server, rolling back:', err);
+        setBudgetState(prevBudget);
+        throw err;
       }
     }
-  }, [configured, user, getHeaders]);
+  }, [configured, user, budget, refreshProfile]);
 
   const addCategory = useCallback(async (name, color, icon) => {
     const resolvedIcon = icon || getCategoryIcon(name);
@@ -278,56 +252,55 @@ export function DataProvider({ children }) {
 
     if (configured && user?.id) {
       try {
-        const res = await fetch(`${API_URL}/api/categories`, {
-          method: 'POST',
-          headers: getHeaders(),
-          body: JSON.stringify({
-            name,
-            color,
-            emoji: resolvedIcon,
-          }),
+        const data = await api.post('/api/categories', {
+          name,
+          color,
+          emoji: resolvedIcon,
         });
-
-        if (res.ok) {
-          const data = await res.json();
+        if (data?.id) {
           setCategoriesState(prev => prev.map(c => c.id === tempId ? { ...c, id: data.id } : c));
         }
       } catch (err) {
-        console.error('Failed to add category to server:', err);
+        console.error('Failed to add category to server, rolling back:', err);
+        setCategoriesState(prev => prev.filter(c => c.id !== tempId));
+        throw err;
       }
     }
-  }, [configured, user, getHeaders]);
+  }, [configured, user]);
 
   const removeCategory = useCallback(async (name) => {
-    setCategoriesState(prev => prev.filter(c => c.name !== name));
+    let previousCats;
+    setCategoriesState(prev => {
+      previousCats = prev;
+      return prev.filter(c => c.name !== name);
+    });
 
     if (configured && user?.id) {
       try {
-        await fetch(`${API_URL}/api/categories/${encodeURIComponent(name)}`, {
-          method: 'DELETE',
-          headers: getHeaders(),
-        });
+        await api.delete(`/api/categories/${encodeURIComponent(name)}`);
       } catch (err) {
-        console.error('Failed to remove category from server:', err);
+        console.error('Failed to remove category from server, rolling back:', err);
+        setCategoriesState(previousCats);
+        throw err;
       }
     }
-  }, [configured, user, getHeaders]);
+  }, [configured, user]);
 
   const setCurrency = useCallback(async (cur) => {
+    const prevCur = currency;
     setCurrencyState(cur);
 
     if (configured && user?.id) {
       try {
-        await fetch(`${API_URL}/api/profile`, {
-          method: 'PUT',
-          headers: getHeaders(),
-          body: JSON.stringify({ currency: cur }),
-        });
+        await api.put('/api/profile', { currency: cur });
+        if (refreshProfile) refreshProfile();
       } catch (err) {
-        console.error('Failed to update currency on server:', err);
+        console.error('Failed to update currency on server, rolling back:', err);
+        setCurrencyState(prevCur);
+        throw err;
       }
     }
-  }, [configured, user, getHeaders]);
+  }, [configured, user, currency, refreshProfile]);
 
   const clearAllData = useCallback(async () => {
     setEntries([]);
@@ -339,17 +312,15 @@ export function DataProvider({ children }) {
 
     if (configured && user?.id) {
       try {
-        await fetch(`${API_URL}/api/profile/clear`, {
-          method: 'DELETE',
-          headers: getHeaders(),
-        });
+        await api.delete('/api/profile/clear', { confirm: true });
+        if (refreshProfile) refreshProfile();
       } catch (err) {
         console.error('Failed to clear user data on server:', err);
       }
     } else {
       Object.values(STORAGE_KEYS).forEach(k => localStorage.removeItem(k));
     }
-  }, [configured, user, getHeaders]);
+  }, [configured, user, refreshProfile]);
 
   // ─── Computed Values ───
   const now = new Date();
@@ -367,7 +338,6 @@ export function DataProvider({ children }) {
   const remaining = budget - totalSpent;
   const budgetPercent = budget > 0 ? Math.min(100, (totalSpent / budget) * 100) : 0;
 
-  // Local warning computation if the API hasn't responded or offline
   const budgetWarning = useMemo(() => {
     if (totalSpent > budget) {
       return `Warning: Spending limit exceeded! You have spent ${currency} ${totalSpent.toLocaleString()} of your ${currency} ${budget.toLocaleString()} budget.`;
@@ -459,7 +429,7 @@ export function DataProvider({ children }) {
     addEntry, updateEntry, removeEntry,
     setBudget, addCategory, removeCategory,
     setCurrency, clearAllData, reload: loadUserData,
-    getHeaders, API_URL
+    api, API_URL,
   };
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;

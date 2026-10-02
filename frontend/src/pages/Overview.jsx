@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useData } from '../lib/DataContext';
 import { useAuth } from '../lib/AuthContext';
 import { formatCurrency } from '../lib/categories';
+import api from '../lib/api';
 import SummaryCard from '../components/SummaryCard';
 import BudgetProgress from '../components/BudgetProgress';
 import LineChart from '../components/LineChart';
@@ -14,7 +15,6 @@ export default function OverviewPage() {
     byCategory, topCategory, daysLeft, dayOfMonth, daysInMonth,
     dailySpending, categories, currency,
     addEntry, monthEntries, insight, setInsight, safeToSpendToday,
-    getHeaders, API_URL
   } = useData();
   const { user } = useAuth();
 
@@ -28,19 +28,13 @@ export default function OverviewPage() {
     setInsightLoading(true);
     setInsightError('');
     try {
-      const res = await fetch(`${API_URL}/api/insight`, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify({
-          clientData: {
-            budget,
-            currency,
-            entries: monthEntries,
-          },
-        }),
+      const data = await api.post('/api/insight', {
+        clientData: {
+          budget,
+          currency,
+          entries: monthEntries,
+        },
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Request failed');
       setInsight(data.insight);
     } catch (err) {
       setInsightError(err.message || 'Failed to fetch AI spending insight.');

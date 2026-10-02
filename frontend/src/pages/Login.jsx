@@ -90,12 +90,8 @@ export default function LoginPage() {
       setSubmitting(true);
       try {
         await signUp(email, password, fullName);
-        setSuccessMsg('Account created successfully! If email verification is enabled on your server, please verify your email before logging in.');
-        // Reset forms
-        setFullName('');
-        setEmail('');
-        setPassword('');
-        setConfirmPassword('');
+        setSuccessMsg('Account created successfully! Welcome to Ledger.');
+        setTimeout(() => navigate('/'), 600);
       } catch (err) {
         setErrorMsg(err.message || 'An error occurred during account creation.');
       } finally {

@@ -1,0 +1,135 @@
+# Ledger
+
+Personal finance dashboard — track expenses, set category budgets, and get AI-powered
+spending insights.
+
+Split into two independently deployable apps:
+
+| Directory | Stack | Default port |
+|---|---|---|
+| `frontend/` | React 19 + Vite + React Router | 5173 |
+| `backend/` | Express 4 + MongoDB (Mongoose) | 5000 |
+
+---
+
+## Quick Start
+
+You need Node.js 18+ and a running MongoDB (local install or Atlas).
+
+```bash
+# 1. Install both workspaces
+npm run install:all
+
+# 2. Backend
+cd backend
+cp .env.example .env      # add your Mongo URI, JWT secrets, GEMINI_API_KEY
+npm run seed               # optional demo users + sample expenses
+npm run dev
+
+# 3. Frontend (new terminal)
+cd frontend
+cp .env.example .env       # VITE_API_URL=http://localhost:5000
+npm run dev
+```
+
+Open http://localhost:5173.
+
+Seeded credentials:
+
+| Role | Email | Password |
+|---|---|---|
+| Admin | `admin@ledger.app` | `AdminPassword123!` |
+| User | `user@ledger.app` | `UserPassword123!` |
+
+---
+
+## Root Scripts
+
+| Command | Description |
+|---|---|
+| `npm run install:all` | Install frontend and backend dependencies |
+| `npm run dev:frontend` | Start the Vite dev server |
+| `npm run dev:backend` | Start the Express server |
+| `npm run seed` | Seed demo data (backend) |
+| `npm test` | Run the backend test suite |
+
+---
+
+## Architecture
+
+```
+Browser (React SPA)
+   │  fetch + Authorization: Bearer <accessToken>
+   ▼
+Express API ──► Mongoose ──► MongoDB
+   │
+   └──► Google Gemini (AI insights; API key stays server-side)
+```
+
+### Auth flow
+
+Short-lived JWT access token held by the client, paired with a rotating `httpOnly`
+refresh-token cookie. On a `401` the frontend calls `POST /api/auth/refresh` once and
+retries the original request — the user never sees a session drop mid-navigation.
+
+### Data isolation
+
+Every query is scoped to `req.user._id`. A user requesting another user's expense id
+gets `404`, never `403` — that distinction avoids leaking which ids exist.
+`PUT /api/profile` uses a strict field allowlist, so `isAdmin` and `email` cannot be
+escalated from the client.
+
+---
+
+## Features
+
+- Expense CRUD with category, note, and date
+- Monthly budget with progress tracking and over-budget warnings
+- Category management (9 defaults seeded per user, custom ones addable)
+- Analytics: daily trend line, category donut, spending heatmap, weekday breakdown
+- Safe-to-spend-today calculation based on remaining budget and days left
+- AI spending analysis and Q&A chat (Gemini 2.5 Flash)
+- Admin panel with platform stats and per-user drill-down
+- Light / dark themes
+- Offline demo mode: if the backend is unreachable, the app falls back to localStorage
+
+---
+
+## Testing
+
+```bash
+cd backend && npm test
+```
+
+16 tests via Vitest + Supertest + `mongodb-memory-server` (no MongoDB install needed):
+auth flow, profile allowlist protection, cross-user ownership isolation, admin
+authorization, and expense filtering.
+
+---
+
+## Environment
+
+`backend/.env.example`
+
+| Variable | Purpose |
+|---|---|
+| `PORT` | Express port |
+| `MONGODB_URI` | Mongoose connection string |
+| `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` | Token signing secrets — replace both in production |
+| `GEMINI_API_KEY` | Enables AI insights (optional) |
+| `FRONTEND_URL` | CORS origin |
+
+`frontend/.env.example`
+
+| Variable | Purpose |
+|---|---|
+| `VITE_API_URL` | Backend base URL |
+
+Both `.env` files are gitignored. Never commit secrets.
+
+---
+
+## More Detail
+
+- [`backend/README.md`](backend/README.md) — full API reference, data models, security notes
+- [`frontend/src/lib/api.js`](frontend/src/lib/api.js) — the centralized API client

@@ -1,163 +1,144 @@
-import { createContext, useContext, useState, useEffect } from 'react';
-import { getSupabase } from './supabaseClient';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import api from './api';
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [supabaseClient, setSupabaseClient] = useState(null);
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [configured, setConfigured] = useState(false);
 
-  useEffect(() => {
-    // Determine API origin dynamically
-    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    const apiHost = isLocal
-      ? `${window.location.protocol}//${window.location.hostname}:5000`
-      : window.location.origin;
-    
-    fetch(`${apiHost}/api/config`)
-      .then(res => res.json())
-      .then(data => {
-        const { supabaseUrl, supabaseAnonKey } = data;
-        
-        if (supabaseUrl && supabaseAnonKey && !supabaseUrl.includes('your_supabase_url')) {
-          const client = getSupabase(supabaseUrl, supabaseAnonKey);
-          setSupabaseClient(client);
-          setConfigured(true);
+  // Initialize auth state
+  const initAuth = useCallback(async () => {
+    try {
+      // 1. Health check backend connectivity
+      const health = await api.get('/api/health');
+      if (health?.status === 'ok' || health?.status === 'degraded') {
+        setConfigured(true);
 
-          client.auth.getSession().then(({ data: { session } }) => {
-            setSession(session);
-            setUser(session?.user ?? null);
+        // 2. Attempt to restore session using stored token or refresh endpoint
+        try {
+          const meData = await api.get('/api/auth/me');
+          if (meData?.user) {
+            setUser(meData.user);
+            setProfile(meData.user);
+            setSession({ access_token: api.getToken(), user: meData.user });
             setLoading(false);
-          });
-
-          const { data: { subscription } } = client.auth.onAuthStateChange((_event, session) => {
-            setSession(session);
-            setUser(session?.user ?? null);
-            setLoading(false);
-          });
-
-          return () => subscription.unsubscribe();
-        } else {
-          // Mock session for demo if Supabase keys aren't added yet
-          const mockUser = {
-            id: 'demo-user-123',
-            email: 'demo@ledger.app',
-            user_metadata: { name: 'Demo User' },
-          };
-          setUser(mockUser);
-          setConfigured(false);
-          setLoading(false);
+            return;
+          }
+        } catch {
+          // Token invalid or expired, attempt refresh
+          try {
+            const refreshData = await api.post('/api/auth/refresh');
+            if (refreshData?.accessToken && refreshData?.user) {
+              api.setToken(refreshData.accessToken);
+              setUser(refreshData.user);
+              setProfile(refreshData.user);
+              setSession({ access_token: refreshData.accessToken, user: refreshData.user });
+              setLoading(false);
+              return;
+            }
+          } catch {
+            // Not logged in yet
+          }
         }
-      })
-      .catch(err => {
-        console.error('Failed to load database configuration from backend:', err);
-        // Fallback to local demo mode on connection error
-        const mockUser = {
-          id: 'demo-user-123',
-          email: 'demo@ledger.app',
-          user_metadata: { name: 'Demo User' },
-        };
-        setUser(mockUser);
+      } else {
         setConfigured(false);
-        setLoading(false);
-      });
+      }
+    } catch {
+      // Backend is unreachable, switch to offline demo mode
+      console.warn('Backend server is unreachable. Running in offline demo mode.');
+      setConfigured(false);
+      const mockUser = {
+        id: 'demo-user-123',
+        email: 'demo@ledger.app',
+        full_name: 'Demo Admin User',
+        fullName: 'Demo Admin User',
+        is_admin: true,
+        isAdmin: true,
+        monthly_budget: 50000,
+        monthlyBudget: 50000,
+        currency: 'PKR',
+        joined_at: new Date().toISOString(),
+      };
+      setUser(mockUser);
+      setProfile(mockUser);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  // Fetch or mock profile data
   useEffect(() => {
-    if (!user) {
-      setProfile(null);
-      return;
-    }
-
-    if (!configured) {
-      setProfile({
-        id: user.id,
-        email: user.email,
-        full_name: user.user_metadata?.name || 'Demo Admin User',
-        is_admin: true,
-        monthly_budget: 50000,
-        currency: 'PKR'
-      });
-      return;
-    }
-
-    if (!supabaseClient) return;
-
-    let active = true;
-    const fetchProfile = async () => {
-      try {
-        const { data, error } = await supabaseClient
-          .from('profiles')
-          .select('*')
-          .eq('id', user.id)
-          .single();
-
-        if (error) {
-          console.error('Error fetching user profile:', error);
-          return;
-        }
-
-        if (active) {
-          setProfile(data);
-        }
-      } catch (err) {
-        console.error('Failed to load user profile:', err);
-      }
-    };
-
-    fetchProfile();
-    return () => { active = false; };
-  }, [user, configured, supabaseClient]);
+    initAuth();
+  }, [initAuth]);
 
   const signUp = async (email, password, fullName) => {
-    if (!configured || !supabaseClient) {
-      throw new Error('Authentication service is currently offline. Please configure your credentials inside backend/.env');
+    if (!configured) {
+      throw new Error('Authentication backend is offline. You can continue as Guest in Demo Mode.');
     }
-    const { data, error } = await supabaseClient.auth.signUp({
+
+    const data = await api.post('/api/auth/register', {
       email,
       password,
-      options: {
-        data: {
-          full_name: fullName
-        }
-      }
+      fullName,
     });
-    if (error) throw error;
-    
-    // If user already exists, Supabase returns user but identities array is empty
-    if (data?.user && data.user.identities && data.user.identities.length === 0) {
-      throw new Error('This email address is already registered. Please sign in instead.');
+
+    if (data?.accessToken) {
+      api.setToken(data.accessToken);
+      setUser(data.user);
+      setProfile(data.user);
+      setSession({ access_token: data.accessToken, user: data.user });
     }
-    
     return data;
   };
 
   const signIn = async (email, password) => {
-    if (!configured || !supabaseClient) {
-      throw new Error('Authentication service is currently offline. Please configure your credentials inside backend/.env');
+    if (!configured) {
+      throw new Error('Authentication backend is offline. You can continue as Guest in Demo Mode.');
     }
-    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
-    if (error) throw error;
+
+    const data = await api.post('/api/auth/login', {
+      email,
+      password,
+    });
+
+    if (data?.accessToken) {
+      api.setToken(data.accessToken);
+      setUser(data.user);
+      setProfile(data.user);
+      setSession({ access_token: data.accessToken, user: data.user });
+    }
     return data;
   };
 
   const signOut = async () => {
-    if (!configured || !supabaseClient) {
-      setUser(null);
-      setSession(null);
-      setProfile(null);
-      return;
+    if (configured) {
+      try {
+        await api.post('/api/auth/logout');
+      } catch (err) {
+        console.error('Logout error:', err);
+      }
     }
-    const { error } = await supabaseClient.auth.signOut();
-    if (error) throw error;
+    api.clearToken();
     setUser(null);
-    setSession(null);
     setProfile(null);
+    setSession(null);
+  };
+
+  const refreshProfile = async () => {
+    if (configured && user) {
+      try {
+        const p = await api.get('/api/profile');
+        if (p) {
+          setProfile(p);
+          setUser(prev => ({ ...prev, ...p }));
+        }
+      } catch (err) {
+        console.error('Failed to refresh profile:', err);
+      }
+    }
   };
 
   const value = {
@@ -169,6 +150,7 @@ export function AuthProvider({ children }) {
     signUp,
     signIn,
     signOut,
+    refreshProfile,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

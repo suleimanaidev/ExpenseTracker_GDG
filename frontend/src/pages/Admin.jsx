@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../lib/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import api from '../lib/api';
 
 export default function AdminPage() {
   const { session, profile, configured } = useAuth();
@@ -22,11 +23,7 @@ export default function AdminPage() {
   const [loadingExpenses, setLoadingExpenses] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Determine API host dynamically
-  const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-  const apiHost = isLocal
-    ? `${window.location.protocol}//${window.location.hostname}:5000`
-    : window.location.origin;
+
 
   // Protect Admin route client-side as well
   useEffect(() => {
@@ -81,23 +78,12 @@ export default function AdminPage() {
       setLoading(true);
       setErrorMsg('');
       try {
-        const token = session?.access_token;
-        if (!token) throw new Error('Authorization session token missing');
-
         // Fetch aggregates
-        const statsRes = await fetch(`${apiHost}/api/admin/stats`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (!statsRes.ok) throw new Error('Failed to retrieve server platform stats');
-        const statsData = await statsRes.json();
+        const statsData = await api.get('/api/admin/stats');
         setStats(statsData);
 
         // Fetch users overview
-        const usersRes = await fetch(`${apiHost}/api/admin/users`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (!usersRes.ok) throw new Error('Failed to list registered platform users');
-        const usersData = await usersRes.json();
+        const usersData = await api.get('/api/admin/users');
         setUsers(usersData.users || []);
       } catch (err) {
         console.error('Failed to load admin dashboard data:', err);
@@ -108,7 +94,7 @@ export default function AdminPage() {
     };
 
     fetchData();
-  }, [profile, session, configured, apiHost]);
+  }, [profile, configured]);
 
   // Load specific user's transactions on selection
   const handleViewUserExpenses = async (userRow) => {
@@ -143,12 +129,7 @@ export default function AdminPage() {
     }
 
     try {
-      const token = session?.access_token;
-      const res = await fetch(`${apiHost}/api/admin/users/${userRow.id}/expenses`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (!res.ok) throw new Error('Failed to retrieve user transactions list');
-      const data = await res.json();
+      const data = await api.get(`/api/admin/users/${userRow.id}/expenses`);
       setSelectedUserExpenses(data.expenses || []);
     } catch (err) {
       console.error(err);
