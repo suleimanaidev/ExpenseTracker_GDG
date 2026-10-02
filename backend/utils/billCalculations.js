@@ -86,25 +86,77 @@ export const coerceAmount = (value) => {
   return negative || sign ? -parsed : parsed;
 };
 
-/** Rounds to 2dp without float drift. */
-export const roundMoney = (value) => Math.round(value * 100) / 100;
+/**
+ * Nudge applied before rounding to two decimal places.
+ *
+ * Binary floats cannot represent most decimals exactly: 1.005 is stored as
+ * 1.00499999999999989, so a plain `Math.round(1.005 * 100)` yields 100 instead
+ * of 101 and silently loses half a paisa. Adding a value far smaller than one
+ * minor unit corrects the representation error without shifting any genuinely
+ * representable amount.
+ */
+const ROUND_EPSILON = 1e-8;
+
+/** Rounds to 2dp, correcting for binary representation error. */
+export const roundMoney = (value) => {
+  if (!Number.isFinite(value)) return 0;
+  const scaled = value * 100;
+  return Math.round(scaled + (scaled < 0 ? -ROUND_EPSILON : ROUND_EPSILON)) / 100;
+};
 
 /** Converts major units to integer minor units, guarding against negatives. */
 export const toMinor = (value) => {
   const num = coerceAmount(value);
   if (num === null || num < 0) return null;
-  return Math.round(num * 100);
+  return Math.round(num * 100 + ROUND_EPSILON);
 };
 
 /** Converts integer minor units back to major units. */
 export const toMajor = (minor) => (minor === null || minor === undefined ? null : minor / 100);
 
 /**
+ * Explicit day-first numeric date, as used on Pakistani and South Asian bills.
+ *
+ * `new Date('05/03/2026')` is parsed by JavaScript as 5 March in some engines
+ * and 3 May in others, which means a misread date silently transposes the day
+ * and the month. A 31st-of-month typo therefore cannot occur, but 05/03 must
+ * mean what the printer meant, so the format is disambiguated here instead of
+ * being handed to the engine. Returns null when the parts are not a real date
+ * (for example 31/02).
+ */
+const parseDayFirstNumericDate = (value) => {
+  const match = value.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$/);
+  if (!match) return null;
+
+  let [, d, m, y] = match;
+  let day = Number(d);
+  let month = Number(m);
+  let year = Number(y);
+
+  if (year < 100) year += year < 70 ? 2000 : 1900;
+
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+
+  const parsed = new Date(year, month - 1, day);
+  // Rejects overflow such as 31 February, which JS would roll into March.
+  if (
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month - 1 ||
+    parsed.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+};
+
+/**
  * Normalizes a date-ish value to `YYYY-MM-DD`.
  *
- * Avoids `toISOString()` for the round trip: `new Date('12 March 2024')` is local
- * midnight, and converting that to UTC shifts the day backwards for anyone west
- * of UTC — silently moving a due date by a day.
+ * Day-first numeric dates are handled explicitly because Pakistani bills are
+ * day-first, and written-out dates avoid `toISOString()` for the round trip:
+ * `new Date('12 March 2024')` is local midnight, and converting that to UTC
+ * shifts the day backwards for anyone west of UTC — silently moving a due date.
  *
  * @returns {string|null}
  */
@@ -119,6 +171,9 @@ export const coerceIsoDate = (value) => {
   if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
     return Number.isNaN(new Date(trimmed).getTime()) ? null : trimmed;
   }
+
+  const dayFirst = parseDayFirstNumericDate(trimmed);
+  if (dayFirst) return dayFirst;
 
   const parsed = new Date(trimmed);
   if (Number.isNaN(parsed.getTime())) return null;
