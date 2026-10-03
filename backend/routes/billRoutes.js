@@ -16,6 +16,7 @@ import { authenticate } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { handleBillUpload, verifyBillFile, verifyOptionalBillFile } from '../middleware/upload.js';
 import { SUPPORTED_CURRENCIES } from '../utils/billCalculations.js';
+import { enforceAiDailyLimit } from '../middleware/aiLimit.js';
 
 const router = Router();
 
@@ -142,7 +143,7 @@ const listQuerySchema = z.object({
  * 8 MB, verified by magic bytes. Returns the extracted bill for review and
  * persists nothing.
  */
-router.post('/scan', scanLimiter, handleBillUpload, verifyBillFile, scanBill);
+router.post('/scan', scanLimiter, enforceAiDailyLimit('scan'), handleBillUpload, verifyBillFile, scanBill);
 
 // Declared before `/:id` so "summary" and "export" are not read as an id.
 router.get('/summary', getBillSummary);

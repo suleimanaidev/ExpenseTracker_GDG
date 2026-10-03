@@ -2,6 +2,7 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { getInsight, chatInsight } from '../controllers/aiController.js';
 import { authenticate } from '../middleware/auth.js';
+import { enforceAiDailyLimit } from '../middleware/aiLimit.js';
 
 const router = Router();
 
@@ -17,7 +18,7 @@ const aiLimiter = rateLimit({
 
 router.use(authenticate);
 
-router.post('/insight', aiLimiter, getInsight);
-router.post('/insight/chat', aiLimiter, chatInsight);
+router.post('/insight', aiLimiter, enforceAiDailyLimit('insight'), getInsight);
+router.post('/insight/chat', aiLimiter, enforceAiDailyLimit('chat'), chatInsight);
 
 export default router;

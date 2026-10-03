@@ -47,6 +47,12 @@ const userSchema = new mongoose.Schema(
       select: false,
       default: null,
     },
+    aiDailyLimit: {
+      type: Number,
+      min: 0,
+      max: 10000,
+      default: 10,
+    },
     monthlyBudget: {
       type: Number,
       default: 50000,

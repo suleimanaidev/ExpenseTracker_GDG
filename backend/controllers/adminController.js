@@ -6,6 +6,9 @@ import { Bill } from '../models/Bill.js';
 import { Category } from '../models/Category.js';
 import { AuditLog } from '../models/AuditLog.js';
 import { AiUsage } from '../models/AiUsage.js';
+import { PlatformSettings } from '../models/PlatformSettings.js';
+import { pingDB } from '../config/db.js';
+import { openBillFile } from '../services/billStorageService.js';
 import { getPlatformStats } from '../services/statsService.js';
 import { writeAuditLog } from '../services/auditService.js';
 import { deleteBillFile } from '../services/billStorageService.js';
@@ -330,6 +333,169 @@ export const getAuditLogs = async (req, res, next) => {
       AuditLog.countDocuments(filter),
     ]);
     return res.json({ logs, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
+  } catch (err) {
+    next(err);
+  }
+};
+
+const csvCell = (value) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+const sendCsv = (res, filename, headers, rows) => {
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send([headers, ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n'));
+};
+
+const parseDateFilters = (query, field) => {
+  const filter = {};
+  if (query.from || query.to) filter[field] = {};
+  if (query.from) filter[field].$gte = new Date(query.from);
+  if (query.to) filter[field].$lte = new Date(query.to);
+  return filter;
+};
+
+export const getPlatformExpenses = async (req, res, next) => {
+  try {
+    const page = parsePage(req.query.page);
+    const limit = parseLimit(req.query.limit);
+    const filter = { ...parseDateFilters(req.query, 'date') };
+    if (req.query.category) filter.category = new RegExp(`^${escapeRegex(req.query.category)}$`, 'i');
+    if (mongoose.Types.ObjectId.isValid(req.query.user)) filter.user = req.query.user;
+    const [expenses, total] = await Promise.all([
+      Expense.find(filter).sort({ date: -1 }).skip((page - 1) * limit).limit(limit).populate('user', 'email fullName').lean(),
+      Expense.countDocuments(filter),
+    ]);
+    return res.json({ expenses, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getPlatformBills = async (req, res, next) => {
+  try {
+    const page = parsePage(req.query.page);
+    const limit = parseLimit(req.query.limit);
+    const filter = { ...parseDateFilters(req.query, 'issueDate') };
+    if (req.query.status) filter.status = req.query.status;
+    if (req.query.vendor) filter.vendor = new RegExp(escapeRegex(req.query.vendor), 'i');
+    if (mongoose.Types.ObjectId.isValid(req.query.user)) filter.user = req.query.user;
+    const [bills, total] = await Promise.all([
+      Bill.find(filter).sort({ issueDate: -1 }).skip((page - 1) * limit).limit(limit).select('-file.storageKey').populate('user', 'email fullName').lean(),
+      Bill.countDocuments(filter),
+    ]);
+    return res.json({ bills, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getAdminBillFile = async (req, res, next) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.billId)) return res.status(404).json({ error: 'Bill not found' });
+    const bill = await Bill.findById(req.params.billId).select('file user');
+    if (!bill?.file?.storageKey) return res.status(404).json({ error: 'Attachment not found' });
+    const file = await openBillFile(bill.file.storageKey);
+    await writeAuditLog({
+      actor: req.user._id,
+      action: 'private_file.view',
+      targetType: 'Bill',
+      targetId: bill._id,
+      metadata: { ownerId: String(bill.user) },
+      req,
+    });
+    res.setHeader('Content-Type', file.mimeType);
+    res.setHeader('Content-Disposition', `inline; filename="${file.filename.replace(/["\r\n]/g, '_')}"`);
+    return file.stream.pipe(res);
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const exportData = async (req, res, next) => {
+  try {
+    const type = req.params.type;
+    const limit = 10000;
+    if (type === 'users') {
+      const users = await User.find({}).sort({ createdAt: -1 }).limit(limit).lean();
+      return sendCsv(res, 'ledger-users.csv', ['id', 'email', 'fullName', 'role', 'status', 'joinedAt', 'lastLoginAt'], users.map((u) => [
+        u._id, u.email, u.fullName, u.isAdmin ? 'admin' : 'user', u.isSuspended ? 'suspended' : 'active', u.createdAt, u.lastLoginAt,
+      ]));
+    }
+    if (type === 'expenses') {
+      const expenses = await Expense.find({}).sort({ date: -1 }).limit(limit).populate('user', 'email').lean();
+      return sendCsv(res, 'ledger-expenses.csv', ['id', 'userEmail', 'category', 'amount', 'date', 'note'], expenses.map((e) => [
+        e._id, e.user?.email, e.category, e.amountMinor / 100, e.date, e.note,
+      ]));
+    }
+    if (type === 'bills') {
+      const bills = await Bill.find({}).sort({ issueDate: -1 }).limit(limit).populate('user', 'email').lean();
+      return sendCsv(res, 'ledger-bills.csv', ['id', 'userEmail', 'vendor', 'total', 'currency', 'status', 'issueDate'], bills.map((b) => [
+        b._id, b.user?.email, b.vendor, b.totalMinor / 100, b.currency, b.status, b.issueDate,
+      ]));
+    }
+    return res.status(400).json({ error: 'Export type must be users, expenses, or bills' });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getAdminHealth = async (req, res, next) => {
+  try {
+    const startedAt = Date.now();
+    const database = await pingDB();
+    return res.json({
+      api: 'ok',
+      database,
+      databaseLatencyMs: Date.now() - startedAt,
+      gemini: process.env.GEMINI_API_KEY ? 'configured' : 'not_configured',
+      uptimeSeconds: Math.round(process.uptime()),
+      nodeVersion: process.version,
+      environment: process.env.NODE_ENV || 'development',
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getAdminSettings = async (req, res, next) => {
+  try {
+    const settings = await PlatformSettings.findOneAndUpdate({ key: 'default' }, {}, { upsert: true, new: true, setDefaultsOnInsert: true });
+    return res.json({ settings });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const updateAdminSettings = async (req, res, next) => {
+  try {
+    const settings = await PlatformSettings.findOneAndUpdate(
+      { key: 'default' },
+      { $set: req.body },
+      { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
+    );
+    await writeAuditLog({ actor: req.user._id, action: 'settings.update', targetType: 'PlatformSettings', targetId: settings._id, metadata: req.body, req });
+    return res.json({ settings });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const updateUserAiLimit = async (req, res, next) => {
+  try {
+    const user = await User.findByIdAndUpdate(
+      req.params.userId,
+      { $set: { aiDailyLimit: req.body.limit } },
+      { new: true, runValidators: true }
+    );
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    await writeAuditLog({
+      actor: req.user._id,
+      action: 'user.ai_limit.update',
+      targetType: 'User',
+      targetId: user._id,
+      metadata: { limit: req.body.limit },
+      req,
+    });
+    return res.json({ user: user.toJSON() });
   } catch (err) {
     next(err);
   }

@@ -1949,6 +1949,61 @@ select option {
 }
 
 /* ─── Settings ─── */
+.admin-layout .admin-sidebar {
+  border-right-color: rgba(0, 161, 155, 0.28);
+}
+
+.admin-toolbar,
+.admin-pagination {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.admin-toolbar input {
+  min-width: min(100%, 280px);
+}
+
+.admin-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.admin-chart-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.65rem 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+}
+
+.admin-chart-row strong {
+  color: var(--gold);
+}
+
+.admin-loading {
+  padding: 2rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.admin-pagination {
+  justify-content: flex-end;
+  margin: 1rem 0 0;
+}
+
+@media (max-width: 900px) {
+  .admin-chart-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .settings-section {
   margin-bottom: 2rem;
 }

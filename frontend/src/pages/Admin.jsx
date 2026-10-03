@@ -1,333 +1,124 @@
-import { useState, useEffect } from 'react';
-import { useAuth } from '../lib/AuthContext';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import api from '../lib/api';
 
+const formatNumber = (value) => Number(value || 0).toLocaleString('en-IN');
+const formatDate = (value) => value ? new Date(value).toLocaleDateString('en-IN', { dateStyle: 'medium' }) : '—';
+
+function LoadingRows() {
+  return <div className="admin-loading">Loading secure admin data…</div>;
+}
+
+function ErrorState({ message }) {
+  return <div className="alert alert--error" role="alert">{message}</div>;
+}
+
+function StatCard({ label, value, hint }) {
+  return <div className="summary-card analytics-stat-card"><div className="summary-card-label">{label}</div><div className="summary-card-value num">{value}</div><div className="summary-card-sub">{hint}</div></div>;
+}
+
 export default function AdminPage() {
-  const { session, profile, configured } = useAuth();
-  const navigate = useNavigate();
-
-  const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState({
-    totalUsers: 0,
-    totalTransactions: 0,
-    totalAmountTracked: 0,
-    recentUsersCount: 0
-  });
-  const [users, setUsers] = useState([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  
-  // Drill-down user modal details
-  const [selectedUser, setSelectedUser] = useState(null);
-  const [selectedUserExpenses, setSelectedUserExpenses] = useState([]);
-  const [loadingExpenses, setLoadingExpenses] = useState(false);
-  const [errorMsg, setErrorMsg] = useState('');
-
-
-
-  // Protect Admin route client-side as well
-  useEffect(() => {
-    if (profile && !profile.is_admin) {
-      navigate('/');
-    }
-  }, [profile, navigate]);
+  const location = useLocation();
+  const section = location.pathname.split('/')[2] || 'overview';
+  const [range, setRange] = useState('30d');
+  const [stats, setStats] = useState(null);
+  const [charts, setCharts] = useState(null);
+  const [users, setUsers] = useState(null);
+  const [rows, setRows] = useState(null);
+  const [settings, setSettings] = useState(null);
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState('');
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    if (!profile) return;
-    
-    if (!configured) {
-      // Mock data inside Local Demo Mode
-      setStats({
-        totalUsers: 3,
-        totalTransactions: 12,
-        totalAmountTracked: 138000,
-        recentUsersCount: 2
-      });
-
-      setUsers([
-        {
-          id: 'demo-user-1',
-          full_name: 'Suleiman Ahmed',
-          email: 'suleiman@ledger.app',
-          joined_at: new Date(Date.now() - 5 * 24 * 3600 * 1000).toISOString(),
-          txCount: 8,
-          totalSpent: 84200
-        },
-        {
-          id: 'demo-user-2',
-          full_name: 'Ayesha Khan',
-          email: 'ayesha@ledger.app',
-          joined_at: new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString(),
-          txCount: 3,
-          totalSpent: 43800
-        },
-        {
-          id: 'demo-user-123',
-          full_name: 'Demo Admin User',
-          email: 'demo@ledger.app',
-          joined_at: new Date(Date.now() - 1 * 24 * 3600 * 1000).toISOString(),
-          txCount: 1,
-          totalSpent: 10000
-        }
-      ]);
-      setLoading(false);
-      return;
-    }
-
-    const fetchData = async () => {
-      setLoading(true);
-      setErrorMsg('');
+    setError('');
+    setPage(1);
+    const load = async () => {
       try {
-        // Fetch aggregates
-        const statsData = await api.get('/api/admin/stats');
-        setStats(statsData);
-
-        // Fetch users overview
-        const usersData = await api.get('/api/admin/users');
-        setUsers(usersData.users || []);
+        if (section === 'overview') {
+          const [statsData, chartsData] = await Promise.all([
+            api.get(`/api/admin/stats?range=${range}`),
+            api.get(`/api/admin/charts?range=${range}`),
+          ]);
+          setStats(statsData);
+          setCharts(chartsData);
+        } else if (section === 'users') {
+          setUsers(await api.get(`/api/admin/users?page=${page}&limit=20&search=${encodeURIComponent(search)}`));
+        } else if (section === 'expenses' || section === 'bills') {
+          setRows(await api.get(`/api/admin/${section}?page=${page}&limit=20`));
+        } else if (section === 'ai-usage') {
+          setRows(await api.get(`/api/admin/ai-usage?page=${page}&limit=20`));
+        } else if (section === 'audit-log') {
+          setRows(await api.get(`/api/admin/audit-logs?page=${page}&limit=20`));
+        } else if (section === 'settings') {
+          setSettings((await api.get('/api/admin/settings')).settings);
+        }
       } catch (err) {
-        console.error('Failed to load admin dashboard data:', err);
-        setErrorMsg(err.message || 'Unable to connect to the administration service.');
-      } finally {
-        setLoading(false);
+        setError(err.message || 'Unable to load admin data.');
       }
     };
+    load();
+  }, [section, range, page, search]);
 
-    fetchData();
-  }, [profile, configured]);
-
-  // Load specific user's transactions on selection
-  const handleViewUserExpenses = async (userRow) => {
-    setSelectedUser(userRow);
-    setSelectedUserExpenses([]);
-    setLoadingExpenses(true);
-
-    if (!configured) {
-      // Seed mock expenses based on mock user id
-      setTimeout(() => {
-        if (userRow.id === 'demo-user-1') {
-          setSelectedUserExpenses([
-            { id: '1', amount: 12000, category: 'Food & Dining', note: 'Office dinner & lunch boxes', spent_at: new Date(Date.now() - 1 * 24 * 3600 * 1000).toISOString() },
-            { id: '2', amount: 4500, category: 'Transport', note: 'Monthly fuel refil', spent_at: new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString() },
-            { id: '3', amount: 60000, category: 'Housing', note: 'House Rent payment', spent_at: new Date(Date.now() - 5 * 24 * 3600 * 1000).toISOString() },
-            { id: '4', amount: 7700, category: 'Utilities', note: 'Electricity bill', spent_at: new Date(Date.now() - 4 * 24 * 3600 * 1000).toISOString() }
-          ]);
-        } else if (userRow.id === 'demo-user-2') {
-          setSelectedUserExpenses([
-            { id: '5', amount: 25000, category: 'Shopping', note: 'Eid clothes shopping', spent_at: new Date(Date.now() - 1 * 24 * 3600 * 1000).toISOString() },
-            { id: '6', amount: 12800, category: 'Entertainment', note: 'Movie & family fun park', spent_at: new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString() },
-            { id: '7', amount: 6000, category: 'Health', note: 'Regular multivitamins', spent_at: new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString() }
-          ]);
-        } else {
-          setSelectedUserExpenses([
-            { id: '8', amount: 10000, category: 'Other', note: 'Demo mode transaction seed', spent_at: new Date().toISOString() }
-          ]);
-        }
-        setLoadingExpenses(false);
-      }, 350);
-      return;
-    }
-
+  const updateSetting = async (key, value) => {
     try {
-      const data = await api.get(`/api/admin/users/${userRow.id}/expenses`);
-      setSelectedUserExpenses(data.expenses || []);
+      const result = await api.put('/api/admin/settings', { [key]: value });
+      setSettings(result.settings);
     } catch (err) {
-      console.error(err);
-      alert('Error fetching user transactions: ' + err.message);
-    } finally {
-      setLoadingExpenses(false);
+      setError(err.message || 'Unable to save platform settings.');
     }
   };
 
-  const fmtCurrency = (val) => {
-    return 'PKR ' + Number(val).toLocaleString('en-IN');
-  };
-
-  const fmtDate = (isoStr) => {
-    if (!isoStr) return 'N/A';
-    return new Date(isoStr).toLocaleDateString('en-IN', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
-    });
-  };
-
-  const filteredUsers = users.filter(u =>
-    u.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    u.email?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  if (loading) {
-    return (
-      <div className="flex-center" style={{ minHeight: '60vh' }}>
-        <div className="loading-spinner"></div>
-      </div>
-    );
-  }
+  if (error) return <><Header section={section} /><ErrorState message={error} /></>;
 
   return (
-    <div className="admin-panel-container">
-      {/* Header */}
-      <div className="page-header">
-        <div className="page-header-label">Platform Dashboard</div>
-        <h1>Admin Control Panel</h1>
-      </div>
-
-      {errorMsg && <div className="alert alert--error mb-6">{errorMsg}</div>}
-
-      {/* Stats Aggregates Row */}
-      <div className="summary-grid">
-        <div className="summary-card">
-          <div className="summary-card-icon">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-          </div>
-          <div className="summary-card-label">Total Registered Users</div>
-          <div className="summary-card-value num">{stats.totalUsers}</div>
-          <div className="summary-card-sub">All active profiles</div>
-        </div>
-
-        <div className="summary-card">
-          <div className="summary-card-icon">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-          </div>
-          <div className="summary-card-label">Platform Volume Tracked</div>
-          <div className="summary-card-value num">{fmtCurrency(stats.totalAmountTracked)}</div>
-          <div className="summary-card-sub">Sum of tracked expenses</div>
-        </div>
-
-        <div className="summary-card">
-          <div className="summary-card-icon">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-          </div>
-          <div className="summary-card-label">Total Transactions</div>
-          <div className="summary-card-value num">{stats.totalTransactions}</div>
-          <div className="summary-card-sub">Logged transaction rows</div>
-        </div>
-
-        <div className="summary-card">
-          <div className="summary-card-icon">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
-          </div>
-          <div className="summary-card-label">New Signups (7 Days)</div>
-          <div className="summary-card-value num">{stats.recentUsersCount}</div>
-          <div className="summary-card-sub">Joined in the last week</div>
-        </div>
-      </div>
-
-      {/* Users List & Search */}
-      <div className="card">
-        <div className="flex-between flex-wrap gap-4 mb-4">
-          <h2 className="card-title" style={{ margin: 0 }}>Registered Users</h2>
-          <div className="filter-group" style={{ margin: 0, minWidth: '280px' }}>
-            <span className="filter-label">Search</span>
-            <input
-              type="text"
-              placeholder="Search by name or email..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              style={{ border: 'none', background: 'transparent' }}
-            />
-          </div>
-        </div>
-
-        <div className="table-responsive">
-          <table className="admin-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                <th style={{ padding: '0.75rem 1rem' }}>Full Name</th>
-                <th style={{ padding: '0.75rem 1rem' }}>Email Address</th>
-                <th style={{ padding: '0.75rem 1rem' }}>Joined Date</th>
-                <th style={{ padding: '0.75rem 1rem', textAlign: 'right' }}>Transactions</th>
-                <th style={{ padding: '0.75rem 1rem', textAlign: 'right' }}>Total Spent</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredUsers.length > 0 ? (
-                filteredUsers.map(userRow => (
-                  <tr
-                    key={userRow.id}
-                    className="admin-table-row"
-                    onClick={() => handleViewUserExpenses(userRow)}
-                    style={{ borderBottom: '1px solid var(--border)', cursor: 'pointer', transition: 'background 0.2s' }}
-                  >
-                    <td style={{ padding: '1rem', fontWeight: 600, color: 'var(--text-primary)' }}>{userRow.full_name}</td>
-                    <td style={{ padding: '1rem', color: 'var(--text-secondary)' }}>{userRow.email}</td>
-                    <td style={{ padding: '1rem', color: 'var(--text-muted)' }} className="num">{fmtDate(userRow.joined_at)}</td>
-                    <td style={{ padding: '1rem', textAlign: 'right', fontWeight: 500 }} className="num">{userRow.txCount}</td>
-                    <td style={{ padding: '1rem', textAlign: 'right', fontWeight: 600, color: 'var(--green)' }} className="num">{fmtCurrency(userRow.totalSpent)}</td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan="5" style={{ padding: '2.5rem 1rem', textAlign: 'center', color: 'var(--text-ghost)' }}>
-                    No users found matching "{searchQuery}"
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Selected User Drill-down Modal */}
-      {selectedUser && (
-        <div className="modal-overlay" onClick={() => setSelectedUser(null)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '640px' }}>
-            <div className="modal-header">
-              <h2 className="modal-title">{selectedUser.full_name}'s Financial Log</h2>
-              <button className="modal-close" onClick={() => setSelectedUser(null)}>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-              </button>
-            </div>
-            
-            <div className="mb-4" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
-              <div>
-                <strong>Email:</strong> {selectedUser.email}
-              </div>
-              <div>
-                <strong>Joined Date:</strong> {fmtDate(selectedUser.joined_at)}
-              </div>
-            </div>
-
-            <h3 style={{ fontSize: '0.875rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>Transaction History (Read-Only)</h3>
-            
-            {loadingExpenses ? (
-              <div className="flex-center" style={{ padding: '2rem' }}>
-                <div className="loading-spinner"></div>
-              </div>
-            ) : selectedUserExpenses.length > 0 ? (
-              <div style={{ maxHeight: '300px', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.8125rem' }}>
-                  <thead>
-                    <tr style={{ background: 'var(--bg-deep)', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)' }}>
-                      <th style={{ padding: '0.5rem 0.75rem' }}>Date</th>
-                      <th style={{ padding: '0.5rem 0.75rem' }}>Category</th>
-                      <th style={{ padding: '0.5rem 0.75rem' }}>Description</th>
-                      <th style={{ padding: '0.5rem 0.75rem', textAlign: 'right' }}>Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedUserExpenses.map(exp => (
-                      <tr key={exp.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                        <td style={{ padding: '0.5rem 0.75rem' }} className="num">{fmtDate(exp.spent_at)}</td>
-                        <td style={{ padding: '0.5rem 0.75rem' }}>
-                          <span className="badge badge--pill" style={{ background: 'var(--gold-dim)', color: 'var(--gold)' }}>{exp.category}</span>
-                        </td>
-                        <td style={{ padding: '0.5rem 0.75rem', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={exp.note}>{exp.note || '—'}</td>
-                        <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontWeight: 600 }} className="num">{fmtCurrency(exp.amount)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-ghost)', border: '1px dashed var(--border)', borderRadius: 'var(--radius-sm)' }}>
-                This user has not tracked any expenses yet.
-              </div>
-            )}
-          </div>
-        </div>
+    <>
+      <Header section={section} />
+      {section === 'overview' && (
+        <>
+          <div className="admin-toolbar"><label htmlFor="admin-range">Date range</label><select id="admin-range" value={range} onChange={(e) => setRange(e.target.value)}><option value="7d">7 days</option><option value="30d">30 days</option><option value="90d">90 days</option><option value="12m">12 months</option></select></div>
+          {!stats ? <LoadingRows /> : <div className="summary-grid">
+            <StatCard label="Total users" value={formatNumber(stats.totalUsers)} hint={`${formatNumber(stats.activeUsers)} active in 30 days`} />
+            <StatCard label="New signups" value={formatNumber(stats.newSignups7d)} hint={`${formatNumber(stats.newSignups30d)} in 30 days`} />
+            <StatCard label="Total volume tracked" value={`PKR ${formatNumber(stats.totalAmountTracked)}`} hint={`${formatNumber(stats.totalTransactions)} expenses`} />
+            <StatCard label="Bills" value={formatNumber(stats.totalBills)} hint={`${formatNumber(stats.unpaidOrOverdueBills)} unpaid or overdue`} />
+            <StatCard label="AI-scanned bills" value={formatNumber(stats.billsScannedByAi)} hint="Verified scan records" />
+          </div>}
+          {charts && <div className="admin-chart-grid"><ChartList title="Signups per day" rows={charts.signups} valueKey="count" /><ChartList title="Top categories" rows={charts.categories} valueKey="total" /><ChartList title="Bills by status" rows={charts.billsByStatus} valueKey="count" /></div>}
+        </>
       )}
-    </div>
+      {section === 'users' && <UsersView users={users} search={search} setSearch={setSearch} page={page} setPage={setPage} />}
+      {section === 'expenses' && <DataTable title="Platform expenses" data={rows?.expenses} columns={['category', 'amountMinor', 'date']} pagination={rows?.pagination} page={page} setPage={setPage} />}
+      {section === 'bills' && <DataTable title="Platform bills" data={rows?.bills} columns={['vendor', 'totalMinor', 'status', 'issueDate']} pagination={rows?.pagination} page={page} setPage={setPage} />}
+      {section === 'ai-usage' && <DataTable title="AI usage" data={rows?.usage} columns={['type', 'success', 'latencyMs', 'createdAt']} pagination={rows?.pagination} page={page} setPage={setPage} />}
+      {section === 'audit-log' && <DataTable title="Audit log" data={rows?.logs} columns={['action', 'targetType', 'createdAt']} pagination={rows?.pagination} page={page} setPage={setPage} />}
+      {section === 'settings' && <SettingsView settings={settings} updateSetting={updateSetting} />}
+    </>
   );
+}
+
+function Header({ section }) {
+  return <div className="page-header"><div className="page-header-label">Secure admin console</div><h1>{section === 'overview' ? 'Platform overview.' : `${section.replace('-', ' ')}.`}</h1><p className="settings-section-description">Viewing user data is logged.</p></div>;
+}
+
+function ChartList({ title, rows = [], valueKey }) {
+  return <div className="card admin-chart-card"><h3 className="settings-section-title font-display">{title}</h3>{rows.length ? rows.map((row) => <div className="admin-chart-row" key={String(row._id)}><span>{row._id}</span><strong>{valueKey === 'total' ? `PKR ${formatNumber(row[valueKey])}` : formatNumber(row[valueKey])}</strong></div>) : <div className="empty-state">No data for this range.</div>}</div>;
+}
+
+function UsersView({ users, search, setSearch, page, setPage }) {
+  return <div className="card settings-section"><div className="admin-toolbar"><input aria-label="Search users" placeholder="Search name or email" value={search} onChange={(e) => setSearch(e.target.value)} /><span>{users?.pagination?.total || 0} users</span></div>{!users ? <LoadingRows /> : <div className="table-responsive"><table className="admin-table"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Expenses</th><th>Total spent</th><th>Joined</th></tr></thead><tbody>{users.users.map((user) => <tr key={user.id}><td>{user.fullName || '—'}</td><td>{user.email}</td><td>{user.isAdmin ? 'Admin' : 'User'}</td><td>{user.isSuspended ? 'Suspended' : 'Active'}</td><td>{formatNumber(user.expenseCount)}</td><td>PKR {formatNumber(user.totalSpent)}</td><td>{formatDate(user.createdAt)}</td></tr>)}</tbody></table></div>}<Pagination page={page} pages={users?.pagination?.pages} setPage={setPage} /></div>;
+}
+
+function DataTable({ title, data, columns, pagination, page, setPage }) {
+  return <div className="card settings-section"><h3 className="settings-section-title font-display">{title}</h3>{!data ? <LoadingRows /> : data.length === 0 ? <div className="empty-state">No records match the current filters.</div> : <div className="table-responsive"><table className="admin-table"><thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{data.map((row, index) => <tr key={row._id || row.id || index}>{columns.map((column) => <td key={column}>{column.includes('Minor') ? formatNumber(row[column] / 100) : column.toLowerCase().includes('at') || column === 'date' || column === 'issueDate' ? formatDate(row[column]) : String(row[column] ?? '—')}</td>)}</tr>)}</tbody></table></div>}<Pagination page={page} pages={pagination?.pages} setPage={setPage} /></div>;
+}
+
+function Pagination({ page, pages, setPage }) {
+  if (!pages || pages <= 1) return null;
+  return <div className="admin-pagination"><button className="btn btn--ghost btn--sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous</button><span>Page {page} of {pages}</span><button className="btn btn--ghost btn--sm" disabled={page >= pages} onClick={() => setPage(page + 1)}>Next</button></div>;
+}
+
+function SettingsView({ settings, updateSetting }) {
+  if (!settings) return <LoadingRows />;
+  return <div className="card settings-section"><h3 className="settings-section-title font-display">Platform settings</h3><label className="settings-preference-row"><span>Allow new signups</span><input type="checkbox" checked={settings.allowNewSignups} onChange={(e) => updateSetting('allowNewSignups', e.target.checked)} /></label><label className="settings-preference-row"><span>Maintenance mode</span><input type="checkbox" checked={settings.maintenanceMode} onChange={(e) => updateSetting('maintenanceMode', e.target.checked)} /></label><label className="settings-preference-row"><span>Default AI daily limit</span><input type="number" min="0" max="10000" value={settings.defaultAiDailyLimit} onChange={(e) => updateSetting('defaultAiDailyLimit', Number(e.target.value))} /></label></div>;
 }

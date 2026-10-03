@@ -6,6 +6,7 @@ import {
   generateRefreshToken,
   JWT_REFRESH_SECRET,
 } from '../middleware/auth.js';
+import { PlatformSettings } from '../models/PlatformSettings.js';
 
 const COOKIE_OPTIONS = {
   httpOnly: true,
@@ -17,6 +18,14 @@ const COOKIE_OPTIONS = {
 export const register = async (req, res, next) => {
   try {
     const { email, password, fullName } = req.body;
+
+    const platformSettings = await PlatformSettings.findOne({ key: 'default' }).lean();
+    if (platformSettings?.allowNewSignups === false) {
+      return res.status(503).json({
+        error: 'New account registration is temporarily unavailable.',
+        code: 'SIGNUPS_DISABLED',
+      });
+    }
 
     const existingUser = await User.findOne({ email: email.toLowerCase() });
     if (existingUser) {

@@ -13,6 +13,14 @@ import {
   deleteUser,
   getAiUsage,
   getAuditLogs,
+  getPlatformExpenses,
+  getPlatformBills,
+  getAdminBillFile,
+  exportData,
+  getAdminHealth,
+  getAdminSettings,
+  updateAdminSettings,
+  updateUserAiLimit,
 } from '../controllers/adminController.js';
 import { authenticate } from '../middleware/auth.js';
 import { requireAdmin } from '../middleware/admin.js';
@@ -82,6 +90,32 @@ router.delete(
   deleteUser
 );
 router.get('/ai-usage', getAiUsage);
+router.put(
+  '/users/:userId/ai-limit',
+  validate({
+    params: z.object({ userId: objectId }),
+    body: z.object({ limit: z.number().int().min(0).max(10000) }),
+  }),
+  updateUserAiLimit
+);
 router.get('/audit-logs', getAuditLogs);
+router.get('/expenses', getPlatformExpenses);
+router.get('/bills', getPlatformBills);
+router.get('/bills/:billId/file', validate({ params: z.object({ billId: objectId }) }), getAdminBillFile);
+router.get('/export/:type', validate({ params: z.object({ type: z.enum(['users', 'expenses', 'bills']) }) }), exportData);
+router.get('/health', getAdminHealth);
+router.get('/settings', getAdminSettings);
+router.put(
+  '/settings',
+  validate({
+    body: z.object({
+      allowNewSignups: z.boolean().optional(),
+      maintenanceMode: z.boolean().optional(),
+      defaultAiDailyLimit: z.number().int().min(0).max(10000).optional(),
+      maxUploadSizeBytes: z.number().int().min(1).max(50 * 1024 * 1024).optional(),
+    }).strict(),
+  }),
+  updateAdminSettings
+);
 
 export default router;
