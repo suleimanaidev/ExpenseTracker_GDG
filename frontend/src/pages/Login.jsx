@@ -4,9 +4,10 @@ import { useAuth } from '../lib/AuthContext';
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { user, signIn, signUp, configured } = useAuth();
+  const { user, signIn, signUp, signOut, configured } = useAuth();
 
   const [isSignUp, setIsSignUp] = useState(false);
+  const [adminMode, setAdminMode] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
@@ -31,9 +32,9 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (user && configured) {
-      navigate('/');
+      navigate(adminMode && (user.isAdmin || user.is_admin) ? '/admin' : '/');
     }
-  }, [user, configured, navigate]);
+  }, [user, configured, navigate, adminMode]);
 
   const validateField = (name, value) => {
     let error = '';
@@ -105,8 +106,14 @@ export default function LoginPage() {
 
       setSubmitting(true);
       try {
-        await signIn(email, password);
-        navigate('/');
+        const data = await signIn(email, password);
+        const signedInUser = data?.user;
+        if (adminMode && !(signedInUser?.isAdmin || signedInUser?.is_admin)) {
+          await signOut();
+          setErrorMsg('This account is not an administrator. Use a regular account or ask an existing admin to promote it.');
+          return;
+        }
+        navigate(adminMode ? '/admin' : '/');
       } catch (err) {
         setErrorMsg(err.message || 'An error occurred during authentication.');
       } finally {
@@ -186,6 +193,21 @@ export default function LoginPage() {
             Create Account
           </button>
         </div>
+
+        {!isSignUp && (
+          <button
+            type="button"
+            className={`admin-login-toggle ${adminMode ? 'admin-login-toggle--active' : ''}`}
+            onClick={() => {
+              setAdminMode((current) => !current);
+              setErrorMsg('');
+              setSuccessMsg('');
+            }}
+            aria-pressed={adminMode}
+          >
+            {adminMode ? 'Admin Login enabled' : 'Login as administrator'}
+          </button>
+        )}
 
         {/* Messages */}
         {errorMsg && <div className="alert alert--error mb-4">{errorMsg}</div>}
