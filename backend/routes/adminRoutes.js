@@ -13,6 +13,7 @@ import {
   deleteUser,
   getAiUsage,
   getAuditLogs,
+  adminAiChat,
   getPlatformExpenses,
   getPlatformBills,
   getAdminBillFile,
@@ -90,6 +91,19 @@ router.delete(
   deleteUser
 );
 router.get('/ai-usage', getAiUsage);
+router.post(
+  '/ai-usage/chat',
+  validate({
+    body: z.object({
+      question: z.string().trim().min(1).max(1000),
+      history: z.array(z.object({
+        role: z.enum(['user', 'model']),
+        text: z.string().max(3000),
+      })).max(10).optional(),
+    }),
+  }),
+  adminAiChat
+);
 router.put(
   '/users/:userId/ai-limit',
   validate({

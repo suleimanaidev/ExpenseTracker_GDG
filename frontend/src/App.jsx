@@ -62,9 +62,7 @@ function App() {
               <Route index element={<Admin />} />
               <Route path="users" element={<Admin />} />
               <Route path="expenses" element={<Admin />} />
-              <Route path="bills" element={<Admin />} />
               <Route path="ai-usage" element={<Admin />} />
-              <Route path="audit-log" element={<Admin />} />
               <Route path="settings" element={<Admin />} />
             </Route>
             

@@ -109,11 +109,75 @@ export default function AdminPage() {
         </>
       )}
       {section === 'users' && <UsersView users={users} search={search} setSearch={setSearch} page={page} setPage={setPage} runUserAction={runUserAction} />}
-      {section === 'expenses' && <DataTable title="Platform expenses" data={rows?.expenses} columns={['category', 'amountMinor', 'date']} pagination={rows?.pagination} page={page} setPage={setPage} />}
-      {section === 'bills' && <DataTable title="Platform bills" data={rows?.bills} columns={['vendor', 'totalMinor', 'status', 'issueDate']} pagination={rows?.pagination} page={page} setPage={setPage} />}
-      {section === 'ai-usage' && <DataTable title="AI usage" data={rows?.usage} columns={['type', 'success', 'latencyMs', 'createdAt']} pagination={rows?.pagination} page={page} setPage={setPage} />}
-      {section === 'audit-log' && <DataTable title="Audit log" data={rows?.logs} columns={['action', 'targetType', 'createdAt']} pagination={rows?.pagination} page={page} setPage={setPage} />}
+      {section === 'expenses' && <DataTable title="User expenses" data={rows?.expenses} columns={['user', 'category', 'amountMinor', 'date']} pagination={rows?.pagination} page={page} setPage={setPage} />}
+      {section === 'ai-usage' && <AdminAiUsage rows={rows} page={page} setPage={setPage} />}
       {section === 'settings' && <SettingsView settings={settings} updateSetting={updateSetting} />}
+    </>
+  );
+}
+
+function AdminAiUsage({ rows, page, setPage }) {
+  const [question, setQuestion] = useState('');
+  const [messages, setMessages] = useState([]);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState('');
+
+  const askAdminAi = async (event) => {
+    event.preventDefault();
+    const trimmed = question.trim();
+    if (!trimmed || sending) return;
+    const nextMessages = [...messages, { role: 'user', text: trimmed }];
+    setMessages(nextMessages);
+    setQuestion('');
+    setSending(true);
+    setError('');
+    try {
+      const response = await api.post('/api/admin/ai-usage/chat', {
+        question: trimmed,
+        history: nextMessages.slice(-10),
+      });
+      setMessages([...nextMessages, { role: 'model', text: response.answer }]);
+    } catch (err) {
+      setError(err.message || 'Unable to answer that admin question.');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="card admin-ai-chat">
+        <div className="admin-ai-chat-heading">
+          <div>
+            <h3 className="settings-section-title font-display">Ask Ledger Admin AI</h3>
+            <p className="settings-section-description">Ask about users, spending, budgets, activity, or platform totals.</p>
+          </div>
+          <span className="danger-zone-badge">Admin only</span>
+        </div>
+        <div className="admin-ai-messages" aria-live="polite">
+          {messages.length === 0 && <div className="empty-state">Try: “Which user spent the most?” or “Show suspended accounts.”</div>}
+          {messages.map((message, index) => (
+            <div className={`admin-ai-message admin-ai-message--${message.role}`} key={`${message.role}-${index}`}>
+              <strong>{message.role === 'user' ? 'You' : 'Ledger Admin AI'}</strong>
+              <p>{message.text}</p>
+            </div>
+          ))}
+        </div>
+        {error && <div className="alert alert--error" role="alert">{error}</div>}
+        <form className="admin-ai-form" onSubmit={askAdminAi}>
+          <input
+            aria-label="Ask Ledger Admin AI"
+            value={question}
+            onChange={(event) => setQuestion(event.target.value)}
+            placeholder="Ask a platform question..."
+            maxLength={1000}
+          />
+          <button type="submit" className="btn btn--gold" disabled={sending || !question.trim()}>
+            {sending ? 'Thinking…' : 'Ask'}
+          </button>
+        </form>
+      </div>
+      <DataTable title="AI usage metrics" data={rows?.usage} columns={['type', 'success', 'latencyMs', 'createdAt']} pagination={rows?.pagination} page={page} setPage={setPage} />
     </>
   );
 }
@@ -131,7 +195,7 @@ function UsersView({ users, search, setSearch, page, setPage, runUserAction }) {
 }
 
 function DataTable({ title, data, columns, pagination, page, setPage }) {
-  return <div className="card settings-section"><h3 className="settings-section-title font-display">{title}</h3>{!data ? <LoadingRows /> : data.length === 0 ? <div className="empty-state">No records match the current filters.</div> : <div className="table-responsive"><table className="admin-table"><thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{data.map((row, index) => <tr key={row._id || row.id || index}>{columns.map((column) => <td key={column}>{column.includes('Minor') ? formatNumber(row[column] / 100) : column.toLowerCase().includes('at') || column === 'date' || column === 'issueDate' ? formatDate(row[column]) : String(row[column] ?? '—')}</td>)}</tr>)}</tbody></table></div>}<Pagination page={page} pages={pagination?.pages} setPage={setPage} /></div>;
+  return <div className="card settings-section"><h3 className="settings-section-title font-display">{title}</h3>{!data ? <LoadingRows /> : data.length === 0 ? <div className="empty-state">No records match the current filters.</div> : <div className="table-responsive"><table className="admin-table"><thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{data.map((row, index) => <tr key={row._id || row.id || index}>{columns.map((column) => <td key={column}>{column === 'user' ? (row.user?.email || row.user?.fullName || '—') : column.includes('Minor') ? formatNumber(row[column] / 100) : column.toLowerCase().includes('at') || column === 'date' || column === 'issueDate' ? formatDate(row[column]) : String(row[column] ?? '—')}</td>)}</tr>)}</tbody></table></div>}<Pagination page={page} pages={pagination?.pages} setPage={setPage} /></div>;
 }
 
 function Pagination({ page, pages, setPage }) {

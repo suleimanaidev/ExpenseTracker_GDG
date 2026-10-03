@@ -12,6 +12,7 @@ import { openBillFile } from '../services/billStorageService.js';
 import { getPlatformStats } from '../services/statsService.js';
 import { writeAuditLog } from '../services/auditService.js';
 import { deleteBillFile } from '../services/billStorageService.js';
+import { generateAIChatResponse } from '../services/aiService.js';
 
 const statsCache = new Map();
 const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -327,6 +328,59 @@ export const getAiUsage = async (req, res, next) => {
       summary: summary[0] || { calls: 0, successes: 0, averageLatencyMs: 0 },
       pagination: { page, limit },
     });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const adminAiChat = async (req, res, next) => {
+  try {
+    const question = req.body.question.trim();
+    const [users, expenseSummary, billSummary] = await Promise.all([
+      User.find({}).select('email fullName isAdmin isSuspended createdAt lastLoginAt monthlyBudget currency').sort({ createdAt: -1 }).limit(500).lean(),
+      Expense.aggregate([
+        { $group: { _id: '$user', count: { $sum: 1 }, totalMinor: { $sum: '$amountMinor' }, categories: { $addToSet: '$category' } } },
+      ]),
+      Bill.aggregate([
+        { $group: { _id: '$user', count: { $sum: 1 }, totalMinor: { $sum: '$totalMinor' }, unpaid: { $sum: { $cond: [{ $ne: ['$status', 'paid'] }, 1, 0] } } } },
+      ]),
+    ]);
+
+    const expenseByUser = new Map(expenseSummary.map((row) => [String(row._id), row]));
+    const billByUser = new Map(billSummary.map((row) => [String(row._id), row]));
+    const directory = users.map((user) => {
+      const expenses = expenseByUser.get(String(user._id)) || {};
+      const bills = billByUser.get(String(user._id)) || {};
+      return {
+        id: String(user._id),
+        name: user.fullName || 'Unnamed user',
+        email: user.email,
+        role: user.isAdmin ? 'admin' : 'user',
+        status: user.isSuspended ? 'suspended' : 'active',
+        joinedAt: user.createdAt,
+        lastLoginAt: user.lastLoginAt,
+        budget: user.monthlyBudget,
+        currency: user.currency,
+        expenseCount: expenses.count || 0,
+        totalSpent: (expenses.totalMinor || 0) / 100,
+        categories: expenses.categories || [],
+        billCount: bills.count || 0,
+        billTotal: (bills.totalMinor || 0) / 100,
+        unpaidBills: bills.unpaid || 0,
+      };
+    });
+
+    const result = await generateAIChatResponse(
+      question,
+      req.body.history || [],
+      `You are Ledger Admin AI. Answer the administrator's question using only the platform directory below.
+You may answer questions about users, account status, budgets, expense totals, categories, bills, signups, and activity.
+Never invent values, passwords, tokens, prompts, file contents, or information not in the directory.
+Be concise and mention when the requested information is not available.
+Platform directory: ${JSON.stringify(directory)}`
+    );
+
+    return res.json({ answer: result.answers, isFallback: result.isFallback });
   } catch (err) {
     next(err);
   }

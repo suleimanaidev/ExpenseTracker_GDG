@@ -5,9 +5,7 @@ const items = [
   ['Overview', '/admin'],
   ['Users', '/admin/users'],
   ['Expenses', '/admin/expenses'],
-  ['Bills', '/admin/bills'],
   ['AI Usage', '/admin/ai-usage'],
-  ['Audit Log', '/admin/audit-log'],
   ['Settings', '/admin/settings'],
 ];
 

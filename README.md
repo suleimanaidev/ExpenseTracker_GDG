@@ -113,6 +113,9 @@ escalated from the client.
 - Analytics: daily trend line, category donut, spending heatmap, weekday breakdown
 - Safe-to-spend-today calculation based on remaining budget and days left
 - AI spending analysis and Q&A chat (Gemini 2.5 Flash)
+- Ask Ledger AI also accepts natural-language expense drafts, voice transcripts, and
+  JPG/PNG/WEBP/PDF receipt attachments. Drafts are validated and shown for review;
+  they never write to the database until the user confirms them.
 - Protected admin console with database-backed role checks, paginated user/data views,
   audit logs, CSV exports, health checks, platform settings, and AI usage monitoring
 - Light / dark themes

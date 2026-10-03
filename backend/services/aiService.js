@@ -127,6 +127,7 @@ export const generateAIChatResponse = async (question, history, systemInstructio
       answers: 'Gemini API key is not configured on the backend server. Please set GEMINI_API_KEY in backend/.env to enable spending insights.',
       isFallback: true,
     };
+
   }
 
   const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
@@ -164,6 +165,118 @@ export const generateAIChatResponse = async (question, history, systemInstructio
 
   return {
     answers: text || 'Unable to generate response.',
+    isFallback: false,
+  };
+};
+
+export const generateAIChatProposal = async ({
+  question,
+  history = [],
+  systemInstruction,
+  categories = [],
+}) => {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    return {
+      answers: 'Gemini API key is not configured on the backend server.',
+      isFallback: true,
+    };
+  }
+
+  const tools = [{
+    functionDeclarations: [
+      {
+        name: 'propose_expenses',
+        description: 'Draft one or more expenses for user confirmation. Never call for a question.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            items: {
+              type: 'ARRAY',
+              items: {
+                type: 'OBJECT',
+                properties: {
+                  amount: { type: 'NUMBER' },
+                  note: { type: 'STRING' },
+                  category: { type: 'STRING', enum: categories.length ? categories : ['Other'] },
+                  date: { type: 'STRING' },
+                  confidence: { type: 'NUMBER' },
+                },
+                required: ['amount'],
+              },
+            },
+          },
+          required: ['items'],
+        },
+      },
+      {
+        name: 'propose_bill',
+        description: 'Draft a bill or receipt for user confirmation. Never call for a question.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            vendor: { type: 'STRING' },
+            invoiceNumber: { type: 'STRING' },
+            issueDate: { type: 'STRING' },
+            dueDate: { type: 'STRING' },
+            currency: { type: 'STRING', enum: ['PKR', 'USD', 'EUR', 'GBP', 'INR'] },
+            items: { type: 'ARRAY', items: { type: 'OBJECT' } },
+            subtotal: { type: 'NUMBER' },
+            tax: { type: 'NUMBER' },
+            discount: { type: 'NUMBER' },
+            total: { type: 'NUMBER' },
+            suggestedCategory: { type: 'STRING', enum: categories.length ? categories : ['Other'] },
+            confidence: { type: 'NUMBER' },
+            warnings: { type: 'ARRAY', items: { type: 'STRING' } },
+          },
+          required: ['vendor', 'total'],
+        },
+      },
+      {
+        name: 'get_spending_summary',
+        description: 'Read-only summary request. Use this for questions about spending.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            from: { type: 'STRING' },
+            to: { type: 'STRING' },
+            category: { type: 'STRING' },
+          },
+        },
+      },
+    ],
+  }];
+
+  const contents = [
+    ...history.slice(-6).map((entry) => ({
+      role: entry.role === 'user' ? 'user' : 'model',
+      parts: [{ text: entry.text }],
+    })),
+    {
+      role: 'user',
+      parts: [{ text: `${systemInstruction}\n\nUser message: ${question}` }],
+    },
+  ];
+
+  const response = await fetch(`${GEMINI_ENDPOINT}?key=${apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents,
+      tools,
+      generationConfig: { temperature: 0.2, maxOutputTokens: 900 },
+    }),
+    signal: AbortSignal.timeout(60000),
+  });
+
+  if (!response.ok) throw new Error(`Gemini API returned status ${response.status}`);
+  const data = await response.json();
+  const part = data?.candidates?.[0]?.content?.parts?.[0];
+  if (part?.functionCall) {
+    return { toolCall: part.functionCall, isFallback: false };
+  }
+  return {
+    answers: part?.text || 'I could not understand that request.',
     isFallback: false,
   };
 };

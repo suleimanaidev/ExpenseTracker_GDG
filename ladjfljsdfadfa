@@ -1,0 +1,274 @@
+[33mcommit e625d97d638836c341a5d5c2e5b8be2dd12a1822[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m
+Author: Suleiman Ahmed <suleiman@ledger.app>
+Date:   Sat Oct 3 12:41:00 2026 +0500
+
+    refactor(auth): use secure settings admin access
+    
+    Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
+
+[33mcommit 884f53caf2a5647deb80b8d4860425c9f4db6b49[m[33m ([m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m
+Author: Suleiman Ahmed <suleiman@ledger.app>
+Date:   Sat Oct 3 12:35:06 2026 +0500
+
+    feat(admin): add secure settings access entry
+    
+    Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
+
+[33mcommit 3e380f46aff6a9e92b3789e9acbded54c614226f[m
+Author: Suleiman Ahmed <suleiman@ledger.app>
+Date:   Sat Oct 3 12:24:52 2026 +0500
+
+    feat(auth): add administrator login option
+    
+    Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
+
+[33mcommit 5bfa6f512cdb319f707b92f89383ad61963532eb[m
+Author: Suleiman Ahmed <suleiman@ledger.app>
+Date:   Sat Oct 3 12:16:34 2026 +0500
+
+    feat(admin): add user lifecycle actions
+    
+    Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
+
+[33mcommit ac6f20292b0bc6dd07cd588a7217a5aa18d04cfe[m
+Author: Suleiman Ahmed <suleiman@ledger.app>
+Date:   Sat Oct 3 12:14:09 2026 +0500
+
+    test(admin): add security coverage and operational tooling
+    
+    Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
+
+[33mcommit 8dcdb883cb21d53578a04c940d6577d23191b5cb[m
+Author: Suleiman Ahmed <suleiman@ledger.app>
+Date:   Sat Oct 3 11:59:31 2026 +0500
+
+    feat(admin): add data views monitoring and settings
+    
+    Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
+
+[33mcommit 303268a8f5b6b4a2460ba2c0f8c8b6b76063fe16[m
+Author: Suleiman Ahmed <suleiman@ledger.app>
+Date:   Sat Oct 3 11:56:17 2026 +0500
+
+    feat(admin): add secure admin foundation and overview APIs
+    
+    Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
+
+[33mcommit 8df6da2aeab268cfcddc0d8245279a6c7cace19a[m
+Author: Suleiman Ahmed <suleiman@ledger.app>
+Date:   Sat Oct 3 11:49:24 2026 +0500
+
+    Improve ui and add features
+
+[33mcommit d225e1774d478d027624b19dd2e3b788f1b86f38[m
+Author: Suleiman Ahmed <suleiman@ledger.app>
+Date:   Sat Oct 3 11:38:02 2026 +0500
+
+    feat: improve ledger UX and documentation
+    
+    Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
+
+[33mcommit e8d738750557a15e1266f7465c64d5d55fd37049[m
+Author: Suleiman Ahmed <suleiman@ledger.app>
+Date:   Sat Oct 3 08:41:28 2026 +0500
+
+    feat(bills): CRUD endpoints, expense linking and attachment streaming
+    
+    Completes the bills feature started by the AI scanner: a scanned extraction
+    could be read but never persisted.
+    
+    POST/GET/PUT/PATCH/DELETE /api/bills, plus /summary and /:id/file, with two
+    invariants across every handler:
+    
+    - Ownership. Every query is scoped by req.user._id, and another user's bill is
+      reported as 404 rather than 403, since a 403 would confirm the id exists.
+    
+    - Exactly one linked Expense. Saving a bill writes the Expense first, then the
+      Bill which references it, so no failure path can leave a Bill pointing at a
+      row that does not exist. This deliberately avoids multi-document
+      transactions, which MongoDB only offers on a replica set.
+    
+    Attachments are validated by magic bytes at save time as well as at scan time,
+    held in GridFS with no public URL, and streamed only to their owner with nosniff
+    and no-store headers.
+    
+    invoiceNumber is normalized to an absent path rather than null, enforced by a
+    schema setter so every "no number" spelling - omitted, null, empty or
+    whitespace - collapses to the same state. The unique index becomes a partial
+    one over documents where the field is actually a string: a sparse index only
+    skips a wholly missing field, so a stored null would still be indexed and would
+    make every unnumbered bill from a vendor collide with the next.
+    
+    saveAnyway now requires affirmative consent (true/on/1/yes). An unchecked
+    checkbox posts nothing, so an empty string is never a legitimate yes, and
+    treating it as one silently disabled duplicate detection for every scanned
+    bill. Ambiguous input now fails towards the duplicate check.
+    
+    The /scan payload is unchanged; the two fixes are in the shared model.
+    
+    Also drops the leftover Supabase schema.sql, superseded by the MERN migration.
+    
+    Tests: 130 cases (130/130 passing) across 3 files.
+
+[33mcommit 21c13eee57fd1fc53e0aa030eaa5ce6ae2b12cd2[m
+Author: Suleiman Ahmed <suleiman@ledger.app>
+Date:   Fri Oct 2 23:56:34 2026 +0500
+
+    feat(bills): AI bill scanner endpoint
+    
+    Phase 2: POST /api/bills/scan extracts a bill with Gemini and returns it for
+    review. Persists nothing.
+    
+    Upload safety
+    - multer memoryStorage only; auth runs before multer so an unauthenticated
+      upload is rejected without buffering a byte
+    - type decided by magic bytes, never by extension or the client's Content-Type
+      (a PHP webshell named .png is rejected)
+    - 8 MB ceiling mapped to 413, multer errors to the standard JSON error shape
+    
+    Extraction
+    - gemini-2.5-flash multimodal, media part before the prompt per Google's
+      single-page guidance, responseMimeType + responseSchema so the model is
+      constrained to the contract rather than free-text prose
+    - prompt forbids inventing values, requires plain unseparated numbers, and
+      covers English, Urdu, Roman Urdu and Pakistani formats (Rs./PKR, GST, TDS,
+      day-first dates)
+    - Zod validation, then a 1% tolerance audit that *reports* sum(items) vs
+      subtotal and subtotal+tax-discount vs total instead of quietly correcting
+      them
+    - suggestedCategory is pinned to a category the user actually owns
+    
+    Reliability and privacy
+    - 10 scans/hour per user, since each call is a paid inference
+    - one retry on transport/timeout/5xx/malformed output, then a friendly
+      enter-manually fallback; no retry on non-retryable 4xx
+    - logs outcome, MIME type and byte count only - never bill contents, never the
+      AI response, never the API key
+    
+    Fixed two bugs the tests exposed
+    - coerceIsoDate parsed 05/03/2026 as 5 May, silently transposing day and month
+      on exactly the day-first Pakistani format this feature targets; day-first
+      numeric dates are now parsed explicitly and 31/02 is rejected as invalid
+    - roundMoney and toMinor lost half a paisa on exact .005 values because 1.005
+      is stored as 1.00499...; a sub-minor-unit epsilon nudge fixes the rounding
+    
+    Tests: 72 cases (72/72 passing), plus the 16 pre-existing API cases still green.
+
+[33mcommit a211e6bbf0153cf43e023223f323954abe1fe0ef[m
+Author: Suleiman Ahmed <suleiman@ledger.app>
+Date:   Fri Oct 2 23:52:27 2026 +0500
+
+    fix(backend): restore the MERN server entry point
+    
+    The previous commit's staging step reverted server.js to the long-superseded
+    Supabase monolith instead of the Express + MongoDB app, so the routers,
+    Helmet, CORS allowlist and layered error handling were all unmounted.
+    
+    Reconstructed to mount auth, profile, categories, expenses, AI, admin and bills
+    routers, with the general 120 req/min limiter, a JSON 404 for unmatched /api
+    paths, and a test-mode guard so importing the app does not bind a port.
+
+[33mcommit cadd60fca7614e2e30df741ef0c267877d691d11[m
+Author: Suleiman Ahmed <suleiman@ledger.app>
+Date:   Fri Oct 2 23:46:53 2026 +0500
+
+    feat(bills): bill model, atomic invoice counter, GridFS storage, pure calculations
+    
+    Phase 1 of the Bills & Invoices feature: persistence and the calculation rules
+    the rest of the feature is built on.
+    
+    Bill model
+    - stores every monetary value as integer minor units, never floats
+    - links exactly one Expense via .expense
+    - file { storageKey, mimeType, size, originalName } for the authenticated preview
+    - source: scanned | manual; status: paid | unpaid | overdue
+    - compound index on (user, issueDate) for statements and lists
+    - unique sparse index on (user, vendor, invoiceNumber); invoiceNumber is left
+      undefined rather than null so sparse correctly ignores unnumbered manual bills
+    
+    Status is stored as paid/unpaid only. overdue is derived from dueDate by
+    resolveBillStatus() at read time, because a stored status cannot stay correct as
+    due dates pass.
+    
+    Counter model
+    - INV-2026-0001 via findOneAndUpdate + \ + upsert, which MongoDB applies
+      atomically; the 11000 race loser falls back to a plain increment
+    
+    billStorageService
+    - GridFS by default (single deployment, no second service to secure)
+    - optional Cloudinary via BILL_STORAGE=cloudinary, loaded with a dynamic import
+      so the optional dependency is not required otherwise
+    - attachments stored with type=authenticated; there is no public URL path
+    - attacker-controlled filenames are stripped of path and shell metacharacters
+    
+    utils/billCalculations (pure, unit tested)
+    - coerceAmount handles Rs./PKR/separators/parenthesised negatives
+    - coerceIsoDate avoids the UTC shift that would move a due date by a day
+    - computeTotals is the single source of truth for live recalculation
+    - auditBillArithmetic reports 1% tolerance breaches instead of fixing them
+    - summarizeBills, pickUpcomingBills, pickDueSoonAlerts for widget and statements
+
+[33mcommit 4c1bd5bb6843154ec555fcaa61c08d971c3ea9bd[m
+Author: Suleiman Ahmed <suleiman@ledger.app>
+Date:   Fri Oct 2 23:43:37 2026 +0500
+
+    feat: migrate Ledger from Supabase to a self-hosted MERN backend
+    
+    Replaces Supabase (Postgres + Supabase Auth + RLS) with an Express + MongoDB
+    backend and a Vite-served React SPA.
+    
+    Backend
+    - config/controllers/middleware/models/routes/services layered structure
+    - JWT access token (15m) + rotating httpOnly refresh cookie, silent client refresh
+    - bcrypt cost 12, Helmet, CORS allowlist, tiered rate limits
+    - money stored as integer minor units to avoid float drift
+    - strict field allowlist on PUT /api/profile so isAdmin/email cannot be escalated
+    - every query scoped by req.user; other users' records return 404, not 403
+    
+    Frontend
+    - dedicated api.js client with automatic Bearer injection and 401 replay
+    - AuthContext/DataContext wired to the REST API with optimistic updates
+    - ice latte theme retained; fixed stray brace that broke the CSS build
+    
+    Tests: 16 Vitest + Supertest + mongodb-memory-server cases, all passing.
+
+[33mcommit d197345764a5cca8daa14c574d94b97a7b995579[m
+Merge: 5780594 70f5742
+Author: suleiman-code <suleimanahmed1222@gmail.com>
+Date:   Thu Oct 1 09:10:20 2026 +0500
+
+    Merge branch 'feat/separate-frontend-backend' into main
+
+[33mcommit 70f57429a9d49b2e8dee8dbb0bad2581fb2486e7[m[33m ([m[1;31morigin/feat/separate-frontend-backend[m[33m)[m
+Author: suleiman-code <suleimanahmed1222@gmail.com>
+Date:   Thu Oct 1 09:08:56 2026 +0500
+
+    feat: split Ledger into separate Vite frontend and Express backend
+    
+    Move the single-page Next.js app into a two-package structure:
+    
+    - frontend/: Vite + React Router SPA (landing, login, overview,
+      transactions, analytics, insights, settings, admin) with auth
+      and data contexts and an Ice Latte theme
+    - backend/: Express API with Supabase client and schema.sql
+    
+    Add root scripts for install:all, dev:frontend and dev:backend.
+    Ignore nested build output (.next/, dist/) and env files.
+
+[33mcommit 5780594452450d8b23e990dcc17bca7bbdd624c3[m
+Author: suleiman-code <suleimanahmed1222@gmail.com>
+Date:   Tue Jul 21 19:41:19 2026 +0500
+
+    I fixed the logo
+
+[33mcommit 16a0313ba400b8ddff03ecf77a7d89fd0507a76a[m
+Author: suleiman-code <suleimanahmed1222@gmail.com>
+Date:   Mon Jul 20 18:27:49 2026 +0500
+
+    fix: suppress browser extension hydration warnings
+
+[33mcommit c3f021a969a3221d3217b9e77fe26042b3cce0a8[m
+Author: suleiman-code <suleimanahmed1222@gmail.com>
+Date:   Mon Jul 20 18:21:16 2026 +0500
+
+    feat: complete Ledger Next.js dashboard with Ice Latte theme and sage-to-spend features
