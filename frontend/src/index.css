@@ -1953,59 +1953,6 @@ select option {
   border-right-color: rgba(0, 161, 155, 0.28);
 }
 
-.admin-login-toggle {
-  flex: 0 0 auto;
-  padding: 0.65rem 0.75rem;
-  border: 1px solid var(--border-input);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 0.78rem;
-  transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
-}
-
-.admin-login-option {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  margin: 1rem 0 0.25rem;
-  padding: 0.75rem;
-  border: 1px solid var(--border-input);
-  border-radius: var(--radius-sm);
-  background: rgba(0, 161, 155, 0.04);
-}
-
-.admin-login-option strong,
-.admin-login-option span {
-  display: block;
-}
-
-.admin-login-option strong {
-  color: var(--text-primary);
-  font-size: 0.8rem;
-}
-
-.admin-login-option span {
-  margin-top: 0.2rem;
-  color: var(--text-muted);
-  font-size: 0.7rem;
-}
-
-.admin-login-toggle:hover,
-.admin-login-toggle:focus-visible {
-  border-color: var(--gold);
-  color: var(--gold);
-}
-
-.admin-login-toggle--active {
-  border-color: rgba(0, 161, 155, 0.55);
-  background: rgba(0, 161, 155, 0.1);
-  color: var(--green);
-  font-weight: 600;
-}
-
 .admin-access-card {
   display: flex;
   align-items: center;
@@ -2029,15 +1976,6 @@ select option {
 }
 
 @media (max-width: 520px) {
-  .admin-login-option {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .admin-login-toggle {
-    width: 100%;
-  }
-
   .admin-access-card {
     align-items: stretch;
     flex-direction: column;
