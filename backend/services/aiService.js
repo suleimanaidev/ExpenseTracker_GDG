@@ -3,6 +3,11 @@
  */
 
 import { SUPPORTED_CURRENCIES } from '../utils/billCalculations.js';
+import { AiUsage } from '../models/AiUsage.js';
+
+export const recordAiUsage = async ({ user, type, success, latencyMs, tokens = null, model = 'gemini-2.5-flash' }) => {
+  return AiUsage.create({ user, type, success, latencyMs, tokens, model });
+};
 
 /**
  * Lets the assistant draft an invoice from a chat message.

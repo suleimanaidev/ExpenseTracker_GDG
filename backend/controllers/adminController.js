@@ -5,6 +5,7 @@ import { Expense } from '../models/Expense.js';
 import { Bill } from '../models/Bill.js';
 import { Category } from '../models/Category.js';
 import { AuditLog } from '../models/AuditLog.js';
+import { AiUsage } from '../models/AiUsage.js';
 import { getPlatformStats } from '../services/statsService.js';
 import { writeAuditLog } from '../services/auditService.js';
 import { deleteBillFile } from '../services/billStorageService.js';
@@ -276,6 +277,59 @@ export const deleteUser = async (req, res, next) => {
     ]);
     await writeAuditLog({ actor: req.user._id, action: 'user.delete', targetType: 'User', targetId: user._id, metadata: { email: user.email }, req });
     return res.json({ message: 'User and related data deleted' });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getAiUsage = async (req, res, next) => {
+  try {
+    const page = parsePage(req.query.page);
+    const limit = parseLimit(req.query.limit);
+    const [rows, summary] = await Promise.all([
+      AiUsage.find({})
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .populate('user', 'email fullName')
+        .lean(),
+      AiUsage.aggregate([
+        {
+          $group: {
+            _id: null,
+            calls: { $sum: 1 },
+            successes: { $sum: { $cond: ['$success', 1, 0] } },
+            averageLatencyMs: { $avg: '$latencyMs' },
+          },
+        },
+      ]),
+    ]);
+    return res.json({
+      usage: rows,
+      summary: summary[0] || { calls: 0, successes: 0, averageLatencyMs: 0 },
+      pagination: { page, limit },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getAuditLogs = async (req, res, next) => {
+  try {
+    const page = parsePage(req.query.page);
+    const limit = parseLimit(req.query.limit);
+    const filter = {};
+    if (req.query.action) filter.action = new RegExp(`^${escapeRegex(req.query.action)}$`);
+    const [logs, total] = await Promise.all([
+      AuditLog.find(filter)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .populate('actor', 'email fullName')
+        .lean(),
+      AuditLog.countDocuments(filter),
+    ]);
+    return res.json({ logs, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
   } catch (err) {
     next(err);
   }

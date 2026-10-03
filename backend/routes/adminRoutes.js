@@ -11,6 +11,8 @@ import {
   updateUserRole,
   resetUserPassword,
   deleteUser,
+  getAiUsage,
+  getAuditLogs,
 } from '../controllers/adminController.js';
 import { authenticate } from '../middleware/auth.js';
 import { requireAdmin } from '../middleware/admin.js';
@@ -79,5 +81,7 @@ router.delete(
   }),
   deleteUser
 );
+router.get('/ai-usage', getAiUsage);
+router.get('/audit-logs', getAuditLogs);
 
 export default router;

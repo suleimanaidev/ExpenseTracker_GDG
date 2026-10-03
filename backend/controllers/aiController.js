@@ -1,6 +1,6 @@
 import { Expense } from '../models/Expense.js';
 import { Bill } from '../models/Bill.js';
-import { generateAIInsight, generateAIChatResponse } from '../services/aiService.js';
+import { generateAIInsight, generateAIChatResponse, recordAiUsage } from '../services/aiService.js';
 import { estimateRunwayDate } from '../utils/financeCalculations.js';
 import { summarizeBills, resolveBillStatus, toMajor } from '../utils/billCalculations.js';
 
@@ -227,6 +227,7 @@ const renderContext = (ctx) => {
 };
 
 export const getInsight = async (req, res, next) => {
+  const startedAt = Date.now();
   try {
     const { clientData } = req.body || {};
     const ctx = await buildFinancialContext(req, clientData);
@@ -246,6 +247,12 @@ Include:
       'Provide my monthly financial analysis and spending insight.',
       systemInstruction
     );
+    await recordAiUsage({
+      user: req.user._id,
+      type: 'insight',
+      success: !result.isFallback,
+      latencyMs: Date.now() - startedAt,
+    });
 
     return res.json({
       insight: result.insight,
@@ -254,11 +261,18 @@ Include:
       runwayDate: ctx.projectedRunway,
     });
   } catch (err) {
+    await recordAiUsage({
+      user: req.user._id,
+      type: 'insight',
+      success: false,
+      latencyMs: Date.now() - startedAt,
+    });
     next(err);
   }
 };
 
 export const chatInsight = async (req, res, next) => {
+  const startedAt = Date.now();
   try {
     const { question, history, clientData } = req.body;
 
@@ -273,11 +287,23 @@ The user can ask about invoices too: how much is outstanding, what is overdue, w
 Answer the user's spending question accurately, concisely, and helpfully based on their financial data.`;
 
     const result = await generateAIChatResponse(question, history, systemInstruction);
+    await recordAiUsage({
+      user: req.user._id,
+      type: 'chat',
+      success: !result.isFallback,
+      latencyMs: Date.now() - startedAt,
+    });
 
     return res.json({
       answers: result.answers,
     });
   } catch (err) {
+    await recordAiUsage({
+      user: req.user._id,
+      type: 'chat',
+      success: false,
+      latencyMs: Date.now() - startedAt,
+    });
     next(err);
   }
 };

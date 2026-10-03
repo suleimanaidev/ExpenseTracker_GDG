@@ -2,6 +2,7 @@ import { Category } from '../models/Category.js';
 import { auditBillArithmetic } from '../utils/billCalculations.js';
 import { parseBillScanResult } from '../schemas/billSchema.js';
 import { scanBillWithGemini } from '../services/billScanService.js';
+import { recordAiUsage } from '../services/aiService.js';
 
 /**
  * AI bill scanner controller.
@@ -47,6 +48,7 @@ const constrainCategory = async (userId, suggested, orderedNames) => {
  * to Gemini.
  */
 export const scanBill = async (req, res, next) => {
+  const startedAt = Date.now();
   try {
     const { buffer, mimeType, size, originalName } = req.billFile;
 
@@ -63,6 +65,13 @@ export const scanBill = async (req, res, next) => {
       buffer,
       mimeType,
       categories: categoryNames,
+    });
+
+    await recordAiUsage({
+      user: req.user._id,
+      type: 'scan',
+      success: Boolean(result.ok),
+      latencyMs: Date.now() - startedAt,
     });
 
     if (!result.ok) {
@@ -114,6 +123,12 @@ export const scanBill = async (req, res, next) => {
       saved: false,
     });
   } catch (err) {
+    await recordAiUsage({
+      user: req.user._id,
+      type: 'scan',
+      success: false,
+      latencyMs: Date.now() - startedAt,
+    });
     next(err);
   }
 };
