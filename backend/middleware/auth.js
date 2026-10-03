@@ -80,6 +80,13 @@ export const authenticate = async (req, res, next) => {
       });
     }
 
+    if (user.isSuspended) {
+      return res.status(403).json({
+        error: 'This account is suspended. Please contact an administrator.',
+        code: 'ACCOUNT_SUSPENDED',
+      });
+    }
+
     req.user = user;
     next();
   } catch (err) {

@@ -77,6 +77,16 @@ export const login = async (req, res, next) => {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
+    if (user.isSuspended) {
+      return res.status(403).json({
+        error: 'This account is suspended. Please contact an administrator.',
+        code: 'ACCOUNT_SUSPENDED',
+      });
+    }
+
+    user.lastLoginAt = new Date();
+    await user.save();
+
     const accessToken = generateAccessToken(user);
     const refreshToken = generateRefreshToken(user);
 
@@ -126,6 +136,14 @@ export const refresh = async (req, res) => {
       return res.status(401).json({
         error: 'User not found',
         code: 'USER_NOT_FOUND',
+      });
+    }
+
+    if (user.isSuspended) {
+      res.clearCookie('refreshToken', COOKIE_OPTIONS);
+      return res.status(403).json({
+        error: 'This account is suspended. Please contact an administrator.',
+        code: 'ACCOUNT_SUSPENDED',
       });
     }
 

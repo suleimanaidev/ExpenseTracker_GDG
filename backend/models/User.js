@@ -25,6 +25,27 @@ const userSchema = new mongoose.Schema(
     isAdmin: {
       type: Boolean,
       default: false,
+      index: true,
+    },
+    isSuspended: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    lastLoginAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+    passwordResetTokenHash: {
+      type: String,
+      select: false,
+      default: null,
+    },
+    passwordResetExpiresAt: {
+      type: Date,
+      select: false,
+      default: null,
     },
     monthlyBudget: {
       type: Number,
