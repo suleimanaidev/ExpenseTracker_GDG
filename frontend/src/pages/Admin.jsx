@@ -29,6 +29,7 @@ export default function AdminPage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [error, setError] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     setError('');
@@ -58,7 +59,27 @@ export default function AdminPage() {
       }
     };
     load();
-  }, [section, range, page, search]);
+  }, [section, range, page, search, reloadKey]);
+
+  const runUserAction = async (action, user) => {
+    try {
+      if (action === 'status') {
+        await api.patch(`/api/admin/users/${user.id}/status`, { suspended: !user.isSuspended });
+      } else if (action === 'role') {
+        await api.patch(`/api/admin/users/${user.id}/role`, { isAdmin: !user.isAdmin });
+      } else if (action === 'reset') {
+        if (!window.confirm(`Generate a one-time reset request for ${user.email}?`)) return;
+        await api.post(`/api/admin/users/${user.id}/reset-password`, {});
+      } else if (action === 'delete') {
+        const confirmation = window.prompt(`Type ${user.email} to permanently delete this user and all related data.`);
+        if (confirmation === null) return;
+        await api.delete(`/api/admin/users/${user.id}`, { confirmEmail: confirmation });
+      }
+      setReloadKey((key) => key + 1);
+    } catch (err) {
+      setError(err.message || 'Unable to complete the user action.');
+    }
+  };
 
   const updateSetting = async (key, value) => {
     try {
@@ -87,7 +108,7 @@ export default function AdminPage() {
           {charts && <div className="admin-chart-grid"><ChartList title="Signups per day" rows={charts.signups} valueKey="count" /><ChartList title="Top categories" rows={charts.categories} valueKey="total" /><ChartList title="Bills by status" rows={charts.billsByStatus} valueKey="count" /></div>}
         </>
       )}
-      {section === 'users' && <UsersView users={users} search={search} setSearch={setSearch} page={page} setPage={setPage} />}
+      {section === 'users' && <UsersView users={users} search={search} setSearch={setSearch} page={page} setPage={setPage} runUserAction={runUserAction} />}
       {section === 'expenses' && <DataTable title="Platform expenses" data={rows?.expenses} columns={['category', 'amountMinor', 'date']} pagination={rows?.pagination} page={page} setPage={setPage} />}
       {section === 'bills' && <DataTable title="Platform bills" data={rows?.bills} columns={['vendor', 'totalMinor', 'status', 'issueDate']} pagination={rows?.pagination} page={page} setPage={setPage} />}
       {section === 'ai-usage' && <DataTable title="AI usage" data={rows?.usage} columns={['type', 'success', 'latencyMs', 'createdAt']} pagination={rows?.pagination} page={page} setPage={setPage} />}
@@ -105,8 +126,8 @@ function ChartList({ title, rows = [], valueKey }) {
   return <div className="card admin-chart-card"><h3 className="settings-section-title font-display">{title}</h3>{rows.length ? rows.map((row) => <div className="admin-chart-row" key={String(row._id)}><span>{row._id}</span><strong>{valueKey === 'total' ? `PKR ${formatNumber(row[valueKey])}` : formatNumber(row[valueKey])}</strong></div>) : <div className="empty-state">No data for this range.</div>}</div>;
 }
 
-function UsersView({ users, search, setSearch, page, setPage }) {
-  return <div className="card settings-section"><div className="admin-toolbar"><input aria-label="Search users" placeholder="Search name or email" value={search} onChange={(e) => setSearch(e.target.value)} /><span>{users?.pagination?.total || 0} users</span></div>{!users ? <LoadingRows /> : <div className="table-responsive"><table className="admin-table"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Expenses</th><th>Total spent</th><th>Joined</th></tr></thead><tbody>{users.users.map((user) => <tr key={user.id}><td>{user.fullName || '—'}</td><td>{user.email}</td><td>{user.isAdmin ? 'Admin' : 'User'}</td><td>{user.isSuspended ? 'Suspended' : 'Active'}</td><td>{formatNumber(user.expenseCount)}</td><td>PKR {formatNumber(user.totalSpent)}</td><td>{formatDate(user.createdAt)}</td></tr>)}</tbody></table></div>}<Pagination page={page} pages={users?.pagination?.pages} setPage={setPage} /></div>;
+function UsersView({ users, search, setSearch, page, setPage, runUserAction }) {
+  return <div className="card settings-section"><div className="admin-toolbar"><input aria-label="Search users" placeholder="Search name or email" value={search} onChange={(e) => setSearch(e.target.value)} /><span>{users?.pagination?.total || 0} users</span></div>{!users ? <LoadingRows /> : <div className="table-responsive"><table className="admin-table"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Expenses</th><th>Total spent</th><th>Joined</th><th>Actions</th></tr></thead><tbody>{users.users.map((user) => <tr key={user.id}><td>{user.fullName || '—'}</td><td>{user.email}</td><td>{user.isAdmin ? 'Admin' : 'User'}</td><td>{user.isSuspended ? 'Suspended' : 'Active'}</td><td>{formatNumber(user.expenseCount)}</td><td>PKR {formatNumber(user.totalSpent)}</td><td>{formatDate(user.createdAt)}</td><td><div className="admin-row-actions"><button className="btn btn--ghost btn--sm" onClick={() => runUserAction('status', user)}>{user.isSuspended ? 'Unsuspend' : 'Suspend'}</button><button className="btn btn--ghost btn--sm" onClick={() => runUserAction('role', user)}>{user.isAdmin ? 'Demote' : 'Promote'}</button><button className="btn btn--ghost btn--sm" onClick={() => runUserAction('reset', user)}>Reset</button><button className="btn btn--danger btn--sm" onClick={() => runUserAction('delete', user)}>Delete</button></div></td></tr>)}</tbody></table></div>}<Pagination page={page} pages={users?.pagination?.pages} setPage={setPage} /></div>;
 }
 
 function DataTable({ title, data, columns, pagination, page, setPage }) {

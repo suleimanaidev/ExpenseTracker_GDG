@@ -1962,6 +1962,13 @@ select option {
   margin-bottom: 1rem;
 }
 
+.admin-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  min-width: 18rem;
+}
+
 .admin-toolbar input {
   min-width: min(100%, 280px);
 }
