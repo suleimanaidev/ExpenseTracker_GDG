@@ -2,12 +2,15 @@
 
 import { useState } from 'react';
 
-export default function Modal({ open, onClose, title, children }) {
+export default function Modal({ open, onClose, title, children, wide = false }) {
   if (!open) return null;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={e => e.stopPropagation()}>
+      <div
+        className={`modal-content${wide ? ' modal-content--wide' : ''}`}
+        onClick={e => e.stopPropagation()}
+      >
         <div className="modal-header">
           <h3 className="modal-title font-display">{title}</h3>
           <button className="modal-close" onClick={onClose} aria-label="Close">

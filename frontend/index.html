@@ -9,6 +9,28 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,100..900;1,9..144,100..900&family=Inter:wght@100..900&family=Outfit:wght@100..900&display=swap" rel="stylesheet" />
+    <!--
+      Apply the saved theme before the first paint.
+
+      ThemeToggleMouse sets `data-theme` from a useEffect, which cannot run before
+      React mounts. Without this, every reload of a dark-mode session renders the
+      light palette first and then snaps to dark, a white flash on each page load.
+
+      Inline and synchronous on purpose: it has to be in the head, before any
+      paint, so it cannot wait for the module bundle. It deliberately mirrors the
+      component's own default of 'light' when nothing is stored.
+    -->
+    <script>
+      try {
+        document.documentElement.setAttribute(
+          'data-theme',
+          localStorage.getItem('theme') === 'dark' ? 'dark' : 'light'
+        );
+      } catch (e) {
+        // Storage can throw in private mode; light is a safe fallback.
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

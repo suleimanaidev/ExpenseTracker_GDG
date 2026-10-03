@@ -76,11 +76,10 @@ export default function InsightsPage() {
       </div>
 
       {/* Main Insight Panel */}
-      <div className="card card--gradient mb-6">
-        <div className="flex-between flex-wrap gap-4 mb-4">
+      <div className="card card--gradient mb-6 insights-analysis-card">
+        <div className="insights-card-header">
           <div>
             <h2 className="insight-card-title">AI Financial Analysis</h2>
-            <div className="card-sub text-sm">Powered by Gemini 2.5 Flash &amp; secure cloud context</div>
           </div>
           <button
             onClick={getInsight}
@@ -100,25 +99,20 @@ export default function InsightsPage() {
             {insight}
           </div>
         ) : (
-          <div className="text-muted text-sm py-4">
+          <div className="insight-empty-state text-muted text-sm">
             Click &quot;Generate Insight&quot; to analyze your {monthEntries.length} transactions for this month and receive personalized budgeting recommendations.
           </div>
         )}
       </div>
 
       {/* Interactive Chat Box */}
-      <div className="card">
+      <div className="card insights-chat-card">
         <div className="card-header mb-4">
           <h3 className="insight-card-title">Ask Ledger AI</h3>
-          <div className="card-sub">Ask specific questions about your spending patterns, runway, or savings targets</div>
         </div>
 
         <div className="chat-messages mb-4" style={{ maxHeight: '350px', overflowY: 'auto' }}>
-          {messages.length === 0 ? (
-            <div className="text-muted text-sm italic py-3 text-center">
-              No questions asked yet. Try: &quot;How much did I spend on food this month?&quot; or &quot;Can I afford a 10,000 PKR purchase?&quot;
-            </div>
-          ) : (
+          {messages.length > 0 && (
             messages.map((msg, idx) => (
               <div
                 key={idx}
@@ -133,22 +127,33 @@ export default function InsightsPage() {
           )}
         </div>
 
-        <form onSubmit={sendChat} className="flex gap-2">
-          <input
-            type="text"
-            className="form-input flex-1"
-            placeholder="Ask a question about your spending..."
-            value={chatInput}
-            onChange={e => setChatInput(e.target.value)}
-            disabled={chatLoading}
-          />
-          <button
-            type="submit"
-            className="btn btn--primary"
-            disabled={chatLoading || !chatInput.trim()}
-          >
-            {chatLoading ? 'Thinking...' : 'Send'}
-          </button>
+        <form onSubmit={sendChat} className="chat-input-row">
+          <div className="chat-question-field">
+            <input
+              type="text"
+              className="form-input"
+              placeholder="Ask a question about your spending..."
+              value={chatInput}
+              onChange={e => setChatInput(e.target.value)}
+              disabled={chatLoading}
+            />
+            <button
+              type="submit"
+              className="btn btn--primary chat-send-button"
+              disabled={chatLoading || !chatInput.trim()}
+              aria-label={chatLoading ? 'Sending question' : 'Send question'}
+              title={chatLoading ? 'Sending question' : 'Send question'}
+            >
+              {chatLoading ? (
+                <span className="chat-send-spinner" aria-hidden="true" />
+              ) : (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="m22 2-7 20-4-9-9-4Z" />
+                  <path d="M22 2 11 13" />
+                </svg>
+              )}
+            </button>
+          </div>
         </form>
       </div>
     </>

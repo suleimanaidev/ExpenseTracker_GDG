@@ -34,6 +34,45 @@
   --radius-sm: 0.5rem;
   --sidebar-width: 260px;
   --sidebar-collapsed: 64px;
+
+  /* Tell the browser which palette to render its own widgets with. Without this
+     Chrome paints autofill chips, the autofill dropdown, scrollbars and select
+     popups in light mode no matter what the theme says, so the email field on
+     Sign In / Create Account stayed light while the rest of the page was dark.
+     Paired with the data-theme attribute set by the bootstrap script in
+     index.html; both must change together. */
+  color-scheme: light;
+
+  /* Translucent surfaces for the landing page.
+     These are the alpha-blended forms of --bg-card / --bg-deep. They used to be
+     hardcoded rgba() literals taken from the light palette, which left the
+     landing page stuck in light mode once the theme toggle was exposed there.
+     Kept as tokens so the dark theme can supply its own values. */
+  --surface-glass: rgba(250, 248, 245, 0.85);
+  --surface-tint: rgba(228, 221, 211, 0.35);
+  --surface-tint-soft: rgba(250, 248, 245, 0.4);
+}
+
+.insights-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.insight-empty-state {
+  min-height: 3rem;
+  display: flex;
+  align-items: center;
+  padding: 0.875rem 1rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-deep);
+}
+
+.insights-chat-card {
+  min-height: 12rem;
 }
 
 /* ─── Reset ─── */
@@ -292,9 +331,14 @@ h4 {
 
 /* ─── Mouse Theme Toggle ─── */
 .mouse-toggle-wrapper {
+  appearance: none;
   display: flex;
   flex-direction: column;
   align-items: center;
+  border: 0;
+  margin: 0;
+  background: transparent;
+  color: inherit;
   cursor: pointer;
   gap: 0px;
   opacity: 0.6;
@@ -471,6 +515,7 @@ h4 {
 }
 
 .sidebar-user {
+  display: none;
   padding: 1rem 0.75rem;
   border-top: 1px solid var(--border);
   display: flex;
@@ -573,6 +618,69 @@ h4 {
   font-weight: 500;
 }
 
+.mobile-nav-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: stretch;
+  gap: 0.25rem;
+  padding: 0 0.25rem;
+  border-left: 1px solid var(--border);
+}
+
+.mobile-nav-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.125rem;
+  min-width: 4.5rem;
+  padding: 0.375rem 0.5rem;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: inherit;
+}
+
+.mobile-nav-action:hover,
+.mobile-nav-action:focus-within {
+  color: var(--gold);
+}
+
+.mobile-nav-action--danger:hover,
+.mobile-nav-action--danger:focus-within {
+  color: var(--red);
+}
+
+.mobile-nav-action .mouse-toggle-wrapper {
+  transform: scale(0.65);
+  transform-origin: center;
+  height: 20px;
+}
+
+.settings-preference-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.875rem 0;
+  border-top: 1px solid var(--border);
+}
+
+.settings-preference-row strong {
+  color: var(--text-primary);
+  font-size: 0.875rem;
+}
+
+.settings-preference-row p {
+  margin-top: 0.25rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.settings-preference-row--logout {
+  align-items: center;
+}
+
 @media (max-width: 768px) {
   .sidebar {
     display: none;
@@ -654,6 +762,14 @@ h4 {
 }
 
 @media (max-width: 900px) {
+  .analytics-stat-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .analytics-stat-card {
+    min-height: auto;
+  }
+
   .summary-grid {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -694,6 +810,80 @@ h4 {
   font-size: 0.6875rem;
   color: var(--text-dim);
   margin-top: 0.25rem;
+}
+
+.analytics-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.analytics-stat-card {
+  position: relative;
+  min-height: 10.5rem;
+  padding: 1.25rem 1.35rem;
+  overflow: hidden;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.analytics-stat-card--average {
+  border-top: 3px solid #c9a227;
+}
+
+.analytics-stat-card--largest {
+  border-top: 3px solid #b5493b;
+}
+
+.analytics-stat-card--category {
+  border-top: 3px solid #2f6f52;
+}
+
+.analytics-stat-card::after {
+  content: '';
+  position: absolute;
+  width: 8rem;
+  height: 8rem;
+  right: -3rem;
+  bottom: -4rem;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.06;
+  pointer-events: none;
+}
+
+.analytics-stat-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--border-focus);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.06);
+}
+
+.analytics-stat-card .summary-card-icon {
+  width: 2.5rem;
+  height: 2.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 1.1rem;
+  border: 1px solid currentColor;
+  border-radius: 0.75rem;
+  background: var(--bg-deep);
+}
+
+.analytics-stat-card .summary-card-label {
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.analytics-stat-card .summary-card-value {
+  margin-top: 0.35rem;
+  font-size: clamp(1.25rem, 2vw, 1.7rem);
+}
+
+.analytics-stat-card .summary-card-sub {
+  max-width: 90%;
+  line-height: 1.4;
 }
 
 /* ─── Budget Progress ─── */
@@ -774,6 +964,38 @@ textarea::placeholder {
   color: var(--text-dim);
 }
 
+/* Browser autofill highlight.
+ *
+ * When the browser has a saved address it fills the email field itself and paints
+ * its own background over ours. That layer is not a background-color we can
+ * override, which is why the field went light in dark mode on both Sign In and
+ * Create Account. An inset box-shadow of the input colour is the only thing that
+ * reliably wins, and it follows border-radius so the corners stay correct.
+ *
+ * -webkit-text-fill-color is needed as well: autofill also forces its own text
+ * colour, which is near-black and unreadable on the dark input. The long
+ * transition is a fallback for browsers that ignore the shadow.
+ *
+ * colour-scheme above handles the dropdown and popup half of the problem; this
+ * handles the filled field itself. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill {
+  -webkit-text-fill-color: var(--text-primary);
+  caret-color: var(--text-primary);
+  -webkit-box-shadow: 0 0 0 1000px var(--bg-input) inset;
+  transition: background-color 9999s ease-out;
+}
+
+/* Firefox draws its highlight as a gradient instead, so the shadow trick does not
+   apply. Dropping the filter reveals the normal background underneath. */
+input:-moz-autofill,
+textarea:-moz-autofill {
+  filter: none;
+  background: var(--bg-input);
+}
+
 select {
   appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238A9099' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
@@ -815,7 +1037,10 @@ select option {
 .password-toggle-btn {
   position: absolute;
   right: 0.75rem;
-  background: none;
+  /* Opaque, and matching the input fill: the button sits on top of the input's
+     right edge, so a transparent background would let the UA's own control show
+     through underneath it. */
+  background: var(--bg-input);
   border: none;
   color: var(--text-dim);
   cursor: pointer;
@@ -829,6 +1054,36 @@ select option {
 
 .password-toggle-btn:hover {
   color: var(--text-primary);
+}
+
+/*
+ * Suppress the browser's built-in "reveal password" control.
+ *
+ * Chromium paints its own eye on every `input[type="password"]`, which lands
+ * beside our toggle button and reads as a doubled icon. Ours is the one that
+ * matches the rest of the UI, so the UA control has to go — but each engine
+ * needs its own lever:
+ *
+ *  - Chrome/Edge will not hide the native reveal button via `::-ms-reveal`.
+ *    Rendering the value through `-webkit-text-security` removes the affordance
+ *    entirely, because the field stops being a native password field.
+ *  - Edge and legacy IE do respect `::-ms-reveal` / `::-ms-clear`.
+ *
+ * The rule is scoped to `[type="password"]`, so switching the input to `text`
+ * (what our own toggle does) drops out of it and the value shows in clear.
+ */
+.password-input-container input[type='password'] {
+  -webkit-text-security: disc;
+}
+
+.password-input-container input[type='password']::-ms-reveal,
+.password-input-container input[type='password']::-ms-clear {
+  display: none;
+}
+
+/* Explicit reset, so a field switched to `text` never inherits the masking. */
+.password-input-container input[type='text'] {
+  -webkit-text-security: none;
 }
 
 .password-toggle-btn:focus-visible {
@@ -1203,6 +1458,189 @@ select option {
   border: 1px dashed var(--border);
 }
 
+/* ─── Bills ─── */
+.bill-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.bill-row {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  padding: 0.75rem 1rem;
+  transition: background-color 0.2s;
+}
+
+.bill-row:hover {
+  background: var(--bg-hover);
+}
+
+.bill-info {
+  min-width: 0;
+  flex: 1;
+}
+
+.bill-vendor {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bill-meta {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bill-status {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border: 1px solid;
+  border-radius: 999px;
+  padding: 0.125rem 0.5rem;
+  flex-shrink: 0;
+}
+
+.bill-amount {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+
+.bill-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+/* The action buttons stay hidden until the row is hovered, matching .tx-actions. */
+.bill-actions .tx-action-btn {
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.bill-row:hover .bill-actions .tx-action-btn,
+.bill-actions .tx-action-btn:focus-visible {
+  opacity: 1;
+}
+
+.bill-confirm {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.bill-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 1.25rem;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
+/* Two fields side by side inside the bill form. */
+.form-row {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.form-row > .form-group {
+  flex: 1;
+  min-width: 0;
+}
+
+.form-label-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.form-hint {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  margin: 0.375rem 0 0;
+}
+
+.bill-line {
+  display: grid;
+  grid-template-columns: 1fr 4.5rem 6rem 5.5rem auto;
+  align-items: center;
+  gap: 0.375rem;
+  margin-top: 0.375rem;
+}
+
+.bill-line-total {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+/* Duplicate-invoice prompt. Uses the red dim token so it inherits the theme. */
+.bill-duplicate {
+  background: var(--red-dim);
+  border: 1px solid var(--red-light);
+  border-radius: var(--radius-sm);
+  padding: 1rem;
+}
+
+.bill-duplicate-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.bill-duplicate-meta {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.125rem;
+}
+
+.bill-duplicate-text {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  margin: 0.625rem 0 0;
+}
+
+/* Scanner's own warnings: a low-confidence read or an arithmetic mismatch the
+   user should look at before saving. Amber reads as "check this" rather than the
+   red used for a hard failure. */
+.bill-scan-warnings {
+  background: var(--gold-dim);
+  border: 1px solid var(--gold);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem 1rem;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.bill-scan-warnings strong {
+  color: var(--text-primary);
+}
+
+.bill-scan-warnings ul {
+  margin: 0.375rem 0 0;
+  padding-left: 1.125rem;
+}
+
+.bill-scan-warnings li {
+  margin-top: 0.1875rem;
+}
+
 /* ─── Filter Bar ─── */
 .filter-bar {
   display: flex;
@@ -1297,6 +1735,15 @@ select option {
   width: 100%;
   max-width: 420px;
   animation: modalIn 0.3s ease;
+}
+
+/* Bills need side-by-side fields and a repeatable line-item grid, which do not
+   fit the default width. The body scrolls instead of the dialog growing off
+   screen. */
+.modal-content--wide {
+  max-width: 580px;
+  max-height: 90vh;
+  overflow-y: auto;
 }
 
 @keyframes modalIn {
@@ -1414,6 +1861,42 @@ select option {
 
 .chat-input-row input {
   flex: 1;
+}
+
+.chat-question-field {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-question-field .form-input {
+  height: 2.75rem;
+  padding-right: 3.25rem;
+}
+
+.chat-send-button {
+  position: absolute;
+  top: 50%;
+  right: 0.35rem;
+  z-index: 1;
+  transform: translateY(-50%);
+  flex: 0 0 2.25rem;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+}
+
+.chat-send-button:active {
+  transform: translateY(-50%) scale(0.97);
+}
+
+.chat-send-spinner {
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
 }
 
 /* ─── Thinking Dots ─── */
@@ -1552,10 +2035,103 @@ select option {
   background: rgba(181, 73, 59, 0.05);
 }
 
+.danger-zone-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.danger-zone-heading .settings-section-title {
+  margin-bottom: 0.25rem;
+}
+
+.settings-section-description {
+  margin: 0 0 1rem;
+  color: var(--text-dim);
+  font-size: 0.8125rem;
+}
+
+.danger-zone-badge {
+  flex-shrink: 0;
+  padding: 0.25rem 0.55rem;
+  border: 1px solid rgba(181, 73, 59, 0.35);
+  border-radius: 999px;
+  color: var(--red-light);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.danger-zone-copy strong,
+.danger-zone-confirm-content strong {
+  color: var(--text-primary);
+  font-size: 0.875rem;
+}
+
 .danger-zone p {
   font-size: 0.8125rem;
   color: var(--text-dim);
-  margin-bottom: 0.75rem;
+  margin: 0.35rem 0 0;
+  line-height: 1.55;
+}
+
+.danger-zone > .btn {
+  margin-top: 1rem;
+}
+
+.danger-zone-confirm {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  margin-top: 1rem;
+  padding: 0.9rem;
+  border: 1px solid rgba(181, 73, 59, 0.4);
+  border-radius: var(--radius-sm);
+  background: rgba(181, 73, 59, 0.1);
+}
+
+.danger-zone-confirm-icon {
+  display: grid;
+  flex: 0 0 1.5rem;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  background: var(--red);
+  color: #fff;
+  font-weight: 700;
+}
+
+.danger-zone-confirm-content {
+  min-width: 0;
+}
+
+.danger-zone-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 0.9rem;
+}
+
+@media (max-width: 520px) {
+  .danger-zone-heading {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .danger-zone-confirm {
+    padding: 0.8rem;
+  }
+
+  .danger-zone-actions {
+    flex-direction: column;
+  }
+
+  .danger-zone-actions .btn {
+    width: 100%;
+  }
 }
 
 /* ─── Two Column Layout ─── */
@@ -1687,8 +2263,11 @@ select option {
 .landing-layout {
   min-height: 100vh;
   background-color: var(--bg-card);
+  /* Page background is a flat --bg-card plus three faint radial glows. A
+     background artwork used to sit here, along with a --landing-veil gradient
+     added only to knock that light image back in dark mode; both are gone, so
+     the veil token is no longer needed either. */
   background-image: 
-    url('/landing_bg.png'),
     radial-gradient(at 0% 0%, rgba(0, 161, 155, 0.05) 0px, transparent 50%),
     radial-gradient(at 50% 0%, rgba(201, 162, 39, 0.04) 0px, transparent 50%),
     radial-gradient(at 100% 100%, rgba(0, 161, 155, 0.04) 0px, transparent 50%);
@@ -1711,7 +2290,7 @@ select option {
 
 .landing-header {
   padding: 1.25rem 0;
-  background: rgba(250, 248, 245, 0.85);
+  background: var(--surface-glass);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--border);
@@ -1762,8 +2341,17 @@ select option {
   color: var(--gold);
 }
 
-.header-cta {
+/* Right-hand cell of the landing header grid: theme toggle then the CTA.
+   Owns the `justify-self: end` that used to sit on .header-cta, since the
+   button is now a flex item and `justify-self` would no longer apply. */
+.landing-header-actions {
   justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.header-cta {
   box-shadow: 0 4px 12px rgba(0, 161, 155, 0.1);
 }
 
@@ -1775,24 +2363,9 @@ select option {
   overflow: hidden;
 }
 
-.landing-hero::before {
-  content: '';
-  position: absolute;
-  top: 54%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 100%;
-  max-width: 860px;
-  height: 100%;
-  max-height: 480px;
-  background-image: url('/finance_dashboard_vector.png');
-  background-size: contain;
-  background-position: center;
-  background-repeat: no-repeat;
-  opacity: 0.07;
-  pointer-events: none;
-  z-index: 0;
-}
+/* The hero used to carry a 7%-opacity watermark of finance_dashboard_vector.png.
+   That asset has been removed from public/, so this rule went with it — leaving it
+   in place made every landing page load request an image that does not exist. */
 
 .landing-hero .landing-container {
   position: relative;
@@ -1894,7 +2467,7 @@ select option {
 /* Features Section */
 .landing-features {
   padding: 4rem 0;
-  background-color: rgba(228, 221, 211, 0.35);
+  background-color: var(--surface-tint);
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
 }
@@ -2251,7 +2824,7 @@ select option {
 /* Call To Action Card */
 .landing-cta {
   padding: 4.5rem 0;
-  background-color: rgba(250, 248, 245, 0.4);
+  background-color: var(--surface-tint-soft);
 }
 
 .cta-card {
@@ -2473,4 +3046,404 @@ select option {
   --text-faint: #70757F;
   --red-dim: rgba(201, 77, 64, 0.12);
   --gold-dim: rgba(0, 161, 155, 0.12);
+
+  /* Dark counterparts of the landing surfaces, mixed from this theme's own
+     --bg-card (#15171E) and --bg-deep (#0D0E11). */
+  --surface-glass: rgba(21, 23, 30, 0.85);
+  --surface-tint: rgba(13, 14, 17, 0.35);
+  --surface-tint-soft: rgba(21, 23, 30, 0.4);
+
+  color-scheme: dark;
+}
+
+/* ─── Responsive layout hardening ─── */
+html,
+body,
+#root {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.main-content {
+  width: 100%;
+  min-width: 0;
+}
+
+.landing-container {
+  width: min(100%, 1200px);
+}
+
+.feature-card,
+.card,
+.summary-card,
+.dashboard-mockup,
+.modal-content {
+  min-width: 0;
+}
+
+@media (max-width: 991px) {
+  .main-content {
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+  }
+
+  .landing-container {
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+  }
+
+  .features-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+  }
+
+  .feature-card {
+    padding: 1.5rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .main-content {
+    padding: 1.25rem 1rem 9rem;
+  }
+
+  .page-header {
+    margin-bottom: 1.25rem;
+  }
+
+  .page-header h1 {
+    font-size: 1.5rem;
+  }
+
+  .card {
+    padding: 1rem;
+  }
+
+  .mobile-nav {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    overflow: visible;
+    padding: 0.375rem 0.25rem;
+  }
+
+  .mobile-nav-link {
+    min-width: 0;
+    flex: initial;
+    padding-left: 0.25rem;
+    padding-right: 0.25rem;
+  }
+
+  .mobile-nav-actions {
+    display: contents;
+  }
+
+  .mobile-nav-action {
+    min-width: 0;
+    padding-left: 0.25rem;
+    padding-right: 0.25rem;
+  }
+
+  .landing-header {
+    padding: 0.875rem 0;
+  }
+
+  .landing-header .landing-container {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  .landing-brand {
+    gap: 0.5rem;
+  }
+
+  .brand-logo-svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  .brand-name {
+    font-size: 1rem;
+  }
+
+  .landing-header-actions {
+    gap: 0.5rem;
+  }
+
+  .hero-title {
+    font-size: clamp(2.25rem, 8vw, 3rem);
+    line-height: 1.08;
+  }
+
+  .landing-nav-links {
+    display: none;
+  }
+
+  .landing-hero {
+    padding: 4rem 0 3.5rem;
+  }
+
+  .hero-subtitle {
+    font-size: 1rem;
+    line-height: 1.6;
+    margin-bottom: 1.75rem;
+  }
+
+  .hero-actions {
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+
+  .hero-actions .btn {
+    min-width: 9.5rem;
+  }
+
+  .landing-features,
+  .landing-showcase,
+  .landing-security {
+    padding: 3rem 0;
+  }
+
+  .section-title {
+    font-size: clamp(1.75rem, 6vw, 2.25rem);
+    line-height: 1.2;
+  }
+
+  .section-header {
+    margin-bottom: 1.75rem;
+  }
+
+  .features-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .feature-card {
+    padding: 1.25rem;
+  }
+
+  .feature-icon-wrapper {
+    margin-bottom: 1rem;
+  }
+
+  .feature-title {
+    font-size: 1.15rem;
+  }
+
+  .showcase-layout {
+    gap: 1.75rem;
+  }
+
+  .showcase-list {
+    width: 100%;
+  }
+
+  .showcase-list li {
+    font-size: 0.85rem;
+    gap: 0.5rem;
+  }
+
+  .showcase-preview-wrapper {
+    width: 100%;
+  }
+
+  .mockup-body {
+    padding: 1rem;
+  }
+
+  .mockup-grid {
+    gap: 0.75rem;
+  }
+
+  .mockup-card {
+    padding: 0.875rem;
+  }
+
+  .mockup-card-value {
+    font-size: 1.05rem;
+  }
+
+  .mockup-banner {
+    gap: 0.75rem;
+    padding: 1rem;
+  }
+
+  .security-subtitle {
+    font-size: 1rem;
+    line-height: 1.6;
+  }
+
+  .cta-card {
+    padding: 3rem 1.25rem;
+  }
+
+  .cta-title {
+    font-size: clamp(1.75rem, 7vw, 2rem);
+  }
+
+  .form-row {
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .filter-bar {
+    align-items: stretch;
+  }
+
+  .filter-bar > *,
+  .filter-bar .search-input,
+  .filter-group {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .filter-group input {
+    width: 100%;
+  }
+
+  .tx-row,
+  .bill-row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .tx-right {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .tx-note {
+    max-width: min(60vw, 220px);
+  }
+
+  .bill-actions {
+    margin-left: auto;
+  }
+
+  .bill-line {
+    grid-template-columns: 1fr 4.5rem;
+    row-gap: 0.5rem;
+  }
+
+  .bill-line > :nth-child(n + 3) {
+    grid-column: span 2;
+  }
+
+  .chat-input-row {
+    align-items: stretch;
+  }
+
+  .chat-input-row .btn {
+    flex-shrink: 0;
+  }
+}
+
+@media (max-width: 480px) {
+  .landing-container {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .header-cta {
+    padding-left: 0.625rem;
+    padding-right: 0.625rem;
+    font-size: 0.7rem;
+  }
+
+  .landing-header-actions .mouse-toggle-wrapper {
+    transform: scale(0.8);
+    transform-origin: center;
+  }
+
+  .landing-hero {
+    padding-top: 3rem;
+  }
+
+  .hero-title {
+    font-size: clamp(2rem, 11vw, 2.5rem);
+  }
+
+  .hero-subtitle {
+    font-size: 0.9rem;
+  }
+
+  .hero-actions,
+  .hero-actions .btn {
+    width: 100%;
+  }
+
+  .hero-actions .btn {
+    min-width: 0;
+  }
+
+  .landing-footer {
+    padding: 1.5rem 0;
+  }
+
+  .mockup-header {
+    padding: 0.75rem 0.875rem;
+  }
+
+  .mockup-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .mockup-banner {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .modal-overlay {
+    padding: 0.5rem;
+  }
+
+  .modal-content {
+    padding: 1rem;
+    border-radius: 0.75rem;
+  }
+
+  .form-actions {
+    flex-direction: column-reverse;
+  }
+
+  .form-actions .btn {
+    width: 100%;
+  }
+
+  .add-category-row {
+    flex-wrap: wrap;
+  }
+
+  .add-category-row input {
+    min-width: 0;
+  }
+
+  .tx-date {
+    display: none;
+  }
+
+  .bill-status {
+    order: 3;
+  }
+
+  .settings-preference-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .settings-preference-row .btn {
+    width: 100%;
+  }
+
+  .insights-card-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .insights-card-header .btn {
+    width: 100%;
+  }
+
+  .insights-chat-card {
+    min-height: 10rem;
+  }
 }

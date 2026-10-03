@@ -3,6 +3,30 @@
 Personal finance dashboard — track expenses, set category budgets, and get AI-powered
 spending insights.
 
+This repository is intentionally split into two deployable apps so the UI and API can
+scale independently while keeping the mental model simple:
+
+- `frontend/` handles the React app, client state, navigation, and charts.
+- `backend/` handles authentication, data persistence, validation, and AI insights.
+
+A quick way to understand the project is to follow one user action end-to-end:
+
+1. A user signs in from the React app.
+2. The frontend calls `/api/auth/*` and then calls `/api/profile`, `/api/categories`, and `/api/expenses`.
+3. Express validates the request, authorizes the user, and queries MongoDB.
+4. The response is rendered in the dashboard, analytics pages, and budget widgets.
+
+This repo is organized so each feature has a clear owner:
+
+- UI pages live in `frontend/src/pages/`
+- Shared app state lives in `frontend/src/lib/`
+- API routes live in `backend/routes/`
+- Request logic lives in `backend/controllers/`
+- Database schemas live in `backend/models/`
+- Business utilities live in `backend/utils/` and `backend/services/`
+
+More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+
 Split into two independently deployable apps:
 
 | Directory | Stack | Default port |

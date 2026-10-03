@@ -1,8 +1,8 @@
 'use client';
 
-export default function SummaryCard({ icon, label, value, sub, accent }) {
+export default function SummaryCard({ icon, label, value, sub, accent, className = '' }) {
   return (
-    <div className="summary-card">
+    <div className={`summary-card ${className}`.trim()}>
       <div className="summary-card-icon" style={accent ? { color: accent } : undefined}>
         {icon}
       </div>

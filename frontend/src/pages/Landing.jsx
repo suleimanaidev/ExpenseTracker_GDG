@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
+import ThemeToggleMouse from '../components/ThemeToggleMouse';
 
 export default function LandingPage() {
   const navigate = useNavigate();
@@ -30,9 +31,16 @@ export default function LandingPage() {
             <a href="#showcase">Dashboard</a>
             <a href="#security">Security</a>
           </nav>
-          <button className="btn btn--gold btn--sm header-cta" onClick={handleGetStarted}>
-            {user ? 'Enter App' : 'Get Started'}
-          </button>
+          {/* Theme toggle sits before the CTA so the primary action keeps the
+              far-right edge of the header. Landing and the app shell are on
+              separate routes, so both copies of the toggle are never mounted at
+              the same time; each reads and writes the same localStorage key. */}
+          <div className="landing-header-actions">
+            <ThemeToggleMouse />
+            <button className="btn btn--gold btn--sm header-cta" onClick={handleGetStarted}>
+              {user ? 'Enter App' : 'Get Started'}
+            </button>
+          </div>
         </div>
       </header>
 
@@ -103,7 +111,7 @@ export default function LandingPage() {
               </div>
               <h3 className="feature-title font-display">Vault-Grade Security</h3>
               <p className="feature-text">
-                Isolated workspaces with PostgreSQL level security and strict database policies. Your ledger is 100% locked and protected.
+                Isolated workspaces with MongoDB document-level scoping and strict database policies. Your ledger is 100% locked and protected.
               </p>
             </div>
 
@@ -210,7 +218,7 @@ export default function LandingPage() {
             <h2 className="section-title font-display">Isolated. Encrypted. Protected.</h2>
           </div>
           <p className="security-subtitle" style={{ marginTop: 0 }}>
-            All user databases operate with strict isolation policies. Your account email, joined dates, and transaction rows are dynamically checked at the database layer using PostgreSQL policies. Your private keys never touch the client build.
+            All user databases operate with strict isolation policies. Your account email, joined dates, and transaction rows are dynamically checked at the database layer using MongoDB document scoping. Your private keys never touch the client build.
           </p>
           
           <div className="security-shield-wrapper">

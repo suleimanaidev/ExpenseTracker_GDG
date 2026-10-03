@@ -2,13 +2,16 @@ import { useState } from 'react';
 import { useData } from '../lib/DataContext';
 import { useAuth } from '../lib/AuthContext';
 import { DEFAULT_CATEGORIES } from '../lib/categories';
+import { useNavigate } from 'react-router-dom';
+import ThemeToggleMouse from '../components/ThemeToggleMouse';
 
 export default function SettingsPage() {
   const {
     loaded, budget, categories, currency, joinedAt,
     setBudget, addCategory, removeCategory, setCurrency, clearAllData,
   } = useData();
-  const { user, configured } = useAuth();
+  const { user, configured, signOut } = useAuth();
+  const navigate = useNavigate();
 
   const [budgetDraft, setBudgetDraft] = useState('');
   const [newCatName, setNewCatName] = useState('');
@@ -37,6 +40,11 @@ export default function SettingsPage() {
   function handleClearAll() {
     clearAllData();
     setShowConfirm(false);
+  }
+
+  async function handleLogout() {
+    await signOut();
+    navigate('/login');
   }
 
   const joinDateFormatted = joinedAt
@@ -140,20 +148,59 @@ export default function SettingsPage() {
         </select>
       </div>
 
+      <div className="card settings-section settings-preferences">
+        <h3 className="settings-section-title font-display">App Preferences</h3>
+        <div className="settings-preference-row">
+          <div>
+            <strong>Appearance</strong>
+            <p>Switch between light and dark mode.</p>
+          </div>
+          <ThemeToggleMouse />
+        </div>
+        <div className="settings-preference-row settings-preference-row--logout">
+          <div>
+            <strong>Session</strong>
+            <p>Sign out of your Ledger account on this device.</p>
+          </div>
+          <button type="button" className="btn btn--danger" onClick={handleLogout}>
+            Log out
+          </button>
+        </div>
+      </div>
+
       {/* Danger Zone */}
       <div className="card settings-section">
-        <h3 className="settings-section-title font-display" style={{ color: 'var(--red)' }}>Danger Zone</h3>
+        <div className="danger-zone-heading">
+          <div>
+            <h3 className="settings-section-title font-display" style={{ color: 'var(--red)' }}>Danger Zone</h3>
+            <p className="settings-section-description">Delete your Ledger data permanently.</p>
+          </div>
+          <span className="danger-zone-badge">Irreversible</span>
+        </div>
         <div className="danger-zone">
-          <p>This will permanently delete all your expenses, budget settings, and custom categories from the cloud.</p>
+          <div className="danger-zone-copy">
+            <strong>Clear all personal finance data</strong>
+            <p>This permanently removes your expenses, budget settings, and custom categories. Your account will stay active.</p>
+          </div>
           {!showConfirm ? (
-            <button className="btn btn--danger" onClick={() => setShowConfirm(true)}>
-              Clear All Data
+            <button type="button" className="btn btn--danger" onClick={() => setShowConfirm(true)}>
+              Clear all data
             </button>
           ) : (
-            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-              <span style={{ fontSize: '0.875rem', color: 'var(--red-light)' }}>Are you sure?</span>
-              <button className="btn btn--danger btn--sm" onClick={handleClearAll}>Yes, delete everything</button>
-              <button className="btn btn--ghost btn--sm" onClick={() => setShowConfirm(false)}>Cancel</button>
+            <div className="danger-zone-confirm" role="alert" aria-live="assertive">
+              <div className="danger-zone-confirm-icon" aria-hidden="true">!</div>
+              <div className="danger-zone-confirm-content">
+                <strong>Are you sure you want to continue?</strong>
+                <p>All expenses, budgets, and custom categories will be deleted and cannot be recovered.</p>
+                <div className="danger-zone-actions">
+                  <button type="button" className="btn btn--danger btn--sm" onClick={handleClearAll}>
+                    Yes, delete everything
+                  </button>
+                  <button type="button" className="btn btn--ghost btn--sm" onClick={() => setShowConfirm(false)}>
+                    Keep my data
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>

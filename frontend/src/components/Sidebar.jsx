@@ -1,7 +1,6 @@
-import { useLocation, useNavigate, Link } from 'react-router-dom';
+import { useLocation, Link } from 'react-router-dom';
 import { useState } from 'react';
 import { useAuth } from '../lib/AuthContext';
-import ThemeToggleMouse from './ThemeToggleMouse';
 
 const NAV_ITEMS = [
   {
@@ -23,21 +22,21 @@ const NAV_ITEMS = [
     ),
   },
   {
-    href: '/analytics',
-    label: 'Analytics',
-    icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/>
-      </svg>
-    ),
-  },
-  {
     href: '/insights',
     label: 'AI Insights',
     icon: (
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
         <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
         <path d="M5 3v4"/><path d="M19 17v4"/><path d="M3 5h4"/><path d="M17 19h4"/>
+      </svg>
+    ),
+  },
+  {
+    href: '/analytics',
+    label: 'Analytics',
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/>
       </svg>
     ),
   },
@@ -55,14 +54,8 @@ const NAV_ITEMS = [
 
 export default function Sidebar({ onCollapseChange }) {
   const { pathname } = useLocation();
-  const navigate = useNavigate();
-  const { user, signOut, configured, profile } = useAuth();
+  const { user, profile } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
-
-  const handleLogout = async () => {
-    await signOut();
-    navigate('/login');
-  };
 
   const handleToggleCollapse = () => {
     const next = !collapsed;
@@ -72,7 +65,7 @@ export default function Sidebar({ onCollapseChange }) {
 
   // Dynamically push Admin item if user has is_admin role
   const menuItems = [...NAV_ITEMS];
-  if (profile?.is_admin) {
+  if (profile?.is_admin || profile?.isAdmin || user?.is_admin || user?.isAdmin) {
     menuItems.push({
       href: '/admin',
       label: 'Admin Panel',
@@ -134,36 +127,6 @@ export default function Sidebar({ onCollapseChange }) {
           })}
         </nav>
 
-        {/* User Account & Logout Footer */}
-        <div className="sidebar-user">
-          {!collapsed && user && (
-            <div className="sidebar-user-info">
-              <div className="sidebar-user-email" title={user.email}>{user.email}</div>
-              <div className="sidebar-user-status">
-                {configured ? '● Cloud Storage Active' : '○ Local Demo Mode'}
-              </div>
-            </div>
-          )}
-
-          {/* Theme Toggle */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: collapsed ? 'center' : 'flex-start', gap: '0.5rem', padding: '0.25rem 0' }}>
-            <ThemeToggleMouse />
-            {!collapsed && <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Toggle Theme</span>}
-          </div>
-
-          <button
-            onClick={handleLogout}
-            className="sidebar-logout-btn"
-            title="Log out"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-              <polyline points="16 17 21 12 16 7"/>
-              <line x1="21" y1="12" x2="9" y2="12"/>
-            </svg>
-            {!collapsed && <span>Logout</span>}
-          </button>
-        </div>
       </aside>
 
       {/* Mobile bottom nav */}

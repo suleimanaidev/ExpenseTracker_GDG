@@ -15,9 +15,11 @@ export default function ThemeToggleMouse() {
   };
 
   return (
-    <div
+    <button
+      type="button"
       className="mouse-toggle-wrapper"
       onClick={toggleTheme}
+      aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
       title={`Switch to ${theme === 'light' ? 'Dark' : 'Light'} Mode`}
     >
       <div className="mouse-cable"></div>
@@ -25,6 +27,6 @@ export default function ThemeToggleMouse() {
         <div className="mouse-wheel"></div>
         <div className="mouse-line"></div>
       </div>
-    </div>
+    </button>
   );
 }

@@ -2,6 +2,76 @@
  * Google Gemini AI Integration Service (gemini-2.5-flash)
  */
 
+import { SUPPORTED_CURRENCIES } from '../utils/billCalculations.js';
+
+/**
+ * Lets the assistant draft an invoice from a chat message.
+ *
+ * This is deliberately not a write. A `draftBill` call returns a draft to the
+ * client, which shows a confirmation card; only after the user presses Add does
+ * anything call `POST /api/bills`. Letting the model write straight to the
+ * database would bypass the validation, the duplicate check and the user's
+ * ability to correct a misread number.
+ *
+ * The category list is baked into the enum, so the model cannot invent a
+ * category the user does not own — it has to pick from what they actually have,
+ * or fall back to a guess the user then corrects on the card.
+ */
+export const buildBillDraftTool = (categoryNames = []) => ({
+  functionDeclarations: [
+    {
+      name: 'draftBill',
+      description:
+        'Record an invoice or bill the user tells you about. Call this only when the user wants to add, log or save a bill — never to answer a question about their spending. If the user asks a question instead, answer it normally without calling this.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          vendor: {
+            type: 'STRING',
+            description: 'Who issued the bill.',
+          },
+          invoiceNumber: {
+            type: 'STRING',
+            description: 'Invoice or bill number, if the user mentioned one. Omit otherwise.',
+          },
+          total: {
+            type: 'NUMBER',
+            description: 'Total amount payable, in the currency below.',
+          },
+          currency: {
+            type: 'STRING',
+            enum: SUPPORTED_CURRENCIES,
+            description: 'Use the user profile currency unless the bill states another.',
+          },
+          category: {
+            type: 'STRING',
+            enum: categoryNames.length > 0 ? categoryNames : ['Other'],
+            description: 'Pick the closest category the user actually owns.',
+          },
+          issueDate: {
+            type: 'STRING',
+            description: 'Date the bill was issued, as YYYY-MM-DD. Use today if the user did not say.',
+          },
+          dueDate: {
+            type: 'STRING',
+            description: 'Payment due date as YYYY-MM-DD. Omit if the user did not say.',
+          },
+          status: {
+            type: 'STRING',
+            enum: ['unpaid', 'paid'],
+            description: 'Default to unpaid unless the user says it is already settled.',
+          },
+          notes: {
+            type: 'STRING',
+            description: 'Anything else the user said about this bill.',
+          },
+        },
+        required: ['vendor', 'total', 'category'],
+      },
+    },
+  ],
+});
+
 export const generateAIInsight = async (prompt, systemInstruction) => {
   const apiKey = process.env.GEMINI_API_KEY;
 

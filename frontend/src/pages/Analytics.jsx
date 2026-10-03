@@ -34,12 +34,14 @@ export default function AnalyticsPage() {
       </div>
 
       {/* Stat Cards */}
-      <div className="summary-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+      <div className="analytics-stat-grid">
         <SummaryCard
           icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>}
           label="Avg Daily Spend"
-          value={fmt(Math.round(avgDailySpend))}
+          value={monthEntries.length > 0 ? fmt(Math.round(avgDailySpend)) : '—'}
+          sub={monthEntries.length > 0 ? 'Based on this month' : 'No expenses yet'}
           accent="#C9A227"
+          className="analytics-stat-card analytics-stat-card--average"
         />
         <SummaryCard
           icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>}
@@ -47,6 +49,7 @@ export default function AnalyticsPage() {
           value={mostExpensive ? fmt(mostExpensive.amount) : '—'}
           sub={mostExpensive ? `${mostExpensive.category}${mostExpensive.note ? ' · ' + mostExpensive.note : ''}` : 'No data'}
           accent="#B5493B"
+          className="analytics-stat-card analytics-stat-card--largest"
         />
         <SummaryCard
           icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>}
@@ -54,11 +57,12 @@ export default function AnalyticsPage() {
           value={mostActiveCat ? mostActiveCat[0] : '—'}
           sub={mostActiveCat ? `${mostActiveCat[1]} transactions` : 'No data'}
           accent="#2F6F52"
+          className="analytics-stat-card analytics-stat-card--category"
         />
       </div>
 
       {/* Charts Row */}
-      <div className="two-col">
+      <div className="two-col analytics-chart-grid">
         <div className="card">
           <div className="card-title">Category Breakdown</div>
           {byCategory.length > 0 ? (
@@ -78,7 +82,7 @@ export default function AnalyticsPage() {
       </div>
 
       {/* Heatmap */}
-      <div className="card" style={{ marginTop: '1rem' }}>
+      <div className="card analytics-heatmap-card" style={{ marginTop: '1rem' }}>
         <div className="card-title">Spending by Day of Week</div>
         <HeatMap data={weekdaySpending} />
       </div>

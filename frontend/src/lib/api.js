@@ -75,8 +75,14 @@ const silentRefreshToken = async () => {
 export async function apiRequest(endpoint, options = {}, isRetry = false) {
   const url = endpoint.startsWith('http') ? endpoint : `${API_URL}${endpoint}`;
 
+  // A FormData body must not be JSON-stringified, and must not carry an explicit
+  // Content-Type: the browser has to generate the multipart boundary itself, and
+  // a hand-written header would omit it so the server would not find the file
+  // part at all. Bill attachments go up through this path.
+  const isMultipart = typeof FormData !== 'undefined' && options.body instanceof FormData;
+
   const headers = {
-    'Content-Type': 'application/json',
+    ...(isMultipart ? {} : { 'Content-Type': 'application/json' }),
     ...(options.headers || {}),
   };
 
@@ -91,7 +97,9 @@ export async function apiRequest(endpoint, options = {}, isRetry = false) {
     credentials: 'include', // essential for sameSite/httpOnly cookies
   };
 
-  if (options.body && typeof options.body === 'object') {
+  if (isMultipart) {
+    config.body = options.body;
+  } else if (options.body && typeof options.body === 'object') {
     config.body = JSON.stringify(options.body);
   }
 
@@ -132,11 +140,49 @@ export async function apiRequest(endpoint, options = {}, isRetry = false) {
   return data;
 }
 
+/**
+ * Fetch an endpoint that returns a binary stream, e.g. a bill attachment.
+ *
+ * apiRequest would throw the body away, since it only understands JSON. This
+ * hands back the Blob so the caller can trigger a download and then revoke the
+ * object URL it makes from that Blob.
+ */
+export async function fetchFile(endpoint, options = {}) {
+  const url = endpoint.startsWith('http') ? endpoint : `${API_URL}${endpoint}`;
+
+  const headers = { ...(options.headers || {}) };
+  const token = getAccessToken();
+  if (token && !headers['Authorization']) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const response = await fetch(url, { ...options, headers, credentials: 'include' });
+
+  if (!response.ok) {
+    let message = response.statusText || 'Download failed';
+    try {
+      const data = await response.json();
+      if (data?.error) message = data.error;
+    } catch {
+      // Non-JSON error body; the status text is the best available message.
+    }
+    const err = new Error(message);
+    err.status = response.status;
+    throw err;
+  }
+
+  return response.blob();
+}
+
 export const api = {
   get: (endpoint, options) => apiRequest(endpoint, { ...options, method: 'GET' }),
   post: (endpoint, body, options) => apiRequest(endpoint, { ...options, method: 'POST', body }),
   put: (endpoint, body, options) => apiRequest(endpoint, { ...options, method: 'PUT', body }),
+  // Added for PATCH /api/bills/:id/status. Anything else already in the app only
+  // ever used PUT, which is why this was absent.
+  patch: (endpoint, body, options) => apiRequest(endpoint, { ...options, method: 'PATCH', body }),
   delete: (endpoint, body, options) => apiRequest(endpoint, { ...options, method: 'DELETE', body }),
+  fetchFile,
   setToken: setAccessToken,
   getToken: getAccessToken,
   clearToken: clearAccessToken,
