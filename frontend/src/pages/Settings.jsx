@@ -168,6 +168,25 @@ export default function SettingsPage() {
         </div>
       </div>
 
+      <div className="card settings-section admin-access-card">
+        <div>
+          <h3 className="settings-section-title font-display">Admin Access</h3>
+          <p className="settings-section-description">
+            {user?.isAdmin || user?.is_admin
+              ? 'Your administrator role is verified securely from the database.'
+              : 'Admin access can only be granted by an existing administrator or the secure server CLI.'}
+          </p>
+        </div>
+        <button
+          type="button"
+          className="btn btn--gold"
+          onClick={() => navigate('/admin')}
+          disabled={!(user?.isAdmin || user?.is_admin)}
+        >
+          {user?.isAdmin || user?.is_admin ? 'Open Admin Panel' : 'Admin access required'}
+        </button>
+      </div>
+
       {/* Danger Zone */}
       <div className="card settings-section">
         <div className="danger-zone-heading">

@@ -1954,8 +1954,7 @@ select option {
 }
 
 .admin-login-toggle {
-  width: 100%;
-  margin: 1rem 0 0.25rem;
+  flex: 0 0 auto;
   padding: 0.65rem 0.75rem;
   border: 1px solid var(--border-input);
   border-radius: var(--radius-sm);
@@ -1964,6 +1963,34 @@ select option {
   cursor: pointer;
   font-size: 0.78rem;
   transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
+}
+
+.admin-login-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 1rem 0 0.25rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-sm);
+  background: rgba(0, 161, 155, 0.04);
+}
+
+.admin-login-option strong,
+.admin-login-option span {
+  display: block;
+}
+
+.admin-login-option strong {
+  color: var(--text-primary);
+  font-size: 0.8rem;
+}
+
+.admin-login-option span {
+  margin-top: 0.2rem;
+  color: var(--text-muted);
+  font-size: 0.7rem;
 }
 
 .admin-login-toggle:hover,
@@ -1977,6 +2004,48 @@ select option {
   background: rgba(0, 161, 155, 0.1);
   color: var(--green);
   font-weight: 600;
+}
+
+.admin-access-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-color: rgba(201, 154, 62, 0.35);
+  background: rgba(201, 154, 62, 0.04);
+}
+
+.admin-access-card .settings-section-title {
+  margin-bottom: 0.25rem;
+}
+
+.admin-access-card .settings-section-description {
+  margin-bottom: 0;
+}
+
+.admin-access-card .btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+@media (max-width: 520px) {
+  .admin-login-option {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .admin-login-toggle {
+    width: 100%;
+  }
+
+  .admin-access-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .admin-access-card .btn {
+    width: 100%;
+  }
 }
 
 .admin-toolbar,

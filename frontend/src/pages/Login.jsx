@@ -195,18 +195,24 @@ export default function LoginPage() {
         </div>
 
         {!isSignUp && (
-          <button
-            type="button"
-            className={`admin-login-toggle ${adminMode ? 'admin-login-toggle--active' : ''}`}
-            onClick={() => {
-              setAdminMode((current) => !current);
-              setErrorMsg('');
-              setSuccessMsg('');
-            }}
-            aria-pressed={adminMode}
-          >
-            {adminMode ? 'Admin Login enabled' : 'Login as administrator'}
-          </button>
+          <div className="admin-login-option">
+            <div>
+              <strong>Administrator access</strong>
+              <span>Use your existing admin account to open the control panel.</span>
+            </div>
+            <button
+              type="button"
+              className={`admin-login-toggle ${adminMode ? 'admin-login-toggle--active' : ''}`}
+              onClick={() => {
+                setAdminMode((current) => !current);
+                setErrorMsg('');
+                setSuccessMsg('');
+              }}
+              aria-pressed={adminMode}
+            >
+              {adminMode ? 'Admin mode on' : 'Admin login'}
+            </button>
+          </div>
         )}
 
         {/* Messages */}
