@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
+import mongoSanitize from 'express-mongo-sanitize';
 import dotenv from 'dotenv';
 
 import { connectDB, isDBConnected, pingDB } from './config/db.js';
@@ -60,6 +61,7 @@ app.use(
 );
 
 app.use(express.json({ limit: '1mb' }));
+app.use(mongoSanitize());
 app.use(cookieParser());
 
 /**

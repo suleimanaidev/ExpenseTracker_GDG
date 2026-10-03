@@ -89,6 +89,8 @@ userSchema.methods.matchPassword = async function (enteredPassword) {
   return bcrypt.compare(enteredPassword, this.passwordHash);
 };
 
+userSchema.index({ createdAt: -1 });
+
 // Static helper to hash password with cost factor 12
 userSchema.statics.hashPassword = async function (password) {
   const salt = await bcrypt.genSalt(12);

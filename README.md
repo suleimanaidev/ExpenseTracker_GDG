@@ -113,7 +113,8 @@ escalated from the client.
 - Analytics: daily trend line, category donut, spending heatmap, weekday breakdown
 - Safe-to-spend-today calculation based on remaining budget and days left
 - AI spending analysis and Q&A chat (Gemini 2.5 Flash)
-- Admin panel with platform stats and per-user drill-down
+- Protected admin console with database-backed role checks, paginated user/data views,
+  audit logs, CSV exports, health checks, platform settings, and AI usage monitoring
 - Light / dark themes
 - Offline demo mode: if the backend is unreachable, the app falls back to localStorage
 
@@ -125,9 +126,16 @@ escalated from the client.
 cd backend && npm test
 ```
 
-16 tests via Vitest + Supertest + `mongodb-memory-server` (no MongoDB install needed):
-auth flow, profile allowlist protection, cross-user ownership isolation, admin
-authorization, and expense filtering.
+Vitest + Supertest + `mongodb-memory-server` (no MongoDB install needed) cover auth
+flow, profile allowlist protection, cross-user ownership isolation, admin
+authorization, suspension checks, and audit logging.
+
+### Admin access
+
+The `/admin` UI is only a navigation guard; every `/api/admin/*` request is protected
+by `authenticate` and `requireAdmin`, which reloads the current user from MongoDB.
+Admin actions are append-only audited. Use `backend/scripts/create-admin.js` to grant
+the first administrator from a controlled CLI session.
 
 ---
 

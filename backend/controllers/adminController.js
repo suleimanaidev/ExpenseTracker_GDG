@@ -116,6 +116,13 @@ export const getUsers = async (req, res, next) => {
       (pageNumber - 1) * pageSize,
       pageSize
     ));
+    await writeAuditLog({
+      actor: req.user._id,
+      action: 'user.list.view',
+      targetType: 'User',
+      metadata: { page: pageNumber, limit: pageSize },
+      req,
+    });
     return res.json({
       users: result.rows,
       pagination: {
@@ -205,6 +212,14 @@ export const getUserDetail = async (req, res, next) => {
       Expense.find({ user: user._id }).sort({ date: -1 }).limit(20),
       Bill.find({ user: user._id }).sort({ issueDate: -1 }).limit(20).select('-file.storageKey'),
     ]);
+    await writeAuditLog({
+      actor: req.user._id,
+      action: 'user.detail.view',
+      targetType: 'User',
+      targetId: user._id,
+      metadata: { expenseCount: expenses.length, billCount: bills.length },
+      req,
+    });
     return res.json({
       user: user.toJSON(),
       expenses: expenses.map((item) => item.toJSON()),
@@ -364,6 +379,7 @@ export const getPlatformExpenses = async (req, res, next) => {
       Expense.find(filter).sort({ date: -1 }).skip((page - 1) * limit).limit(limit).populate('user', 'email fullName').lean(),
       Expense.countDocuments(filter),
     ]);
+    await writeAuditLog({ actor: req.user._id, action: 'expenses.list.view', targetType: 'Expense', metadata: { page, limit }, req });
     return res.json({ expenses, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
   } catch (err) {
     next(err);
@@ -382,6 +398,7 @@ export const getPlatformBills = async (req, res, next) => {
       Bill.find(filter).sort({ issueDate: -1 }).skip((page - 1) * limit).limit(limit).select('-file.storageKey').populate('user', 'email fullName').lean(),
       Bill.countDocuments(filter),
     ]);
+    await writeAuditLog({ actor: req.user._id, action: 'bills.list.view', targetType: 'Bill', metadata: { page, limit }, req });
     return res.json({ bills, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
   } catch (err) {
     next(err);
