@@ -64,12 +64,23 @@ const billSchema = new mongoose.Schema(
       maxlength: 200,
     },
 
-    // Left undefined rather than null when absent, so the sparse unique index
-    // below correctly ignores manual bills that were never given a number.
+    // Normalized to `undefined` whenever there is no usable number, so the
+    // partial unique index below ignores unnumbered bills entirely.
+    //
+    // Every "no invoice number" spelling a client can send — the field omitted,
+    // `null`, `''` or whitespace — collapses to the same absent path. Mongoose
+    // omits `undefined` on save, which is the only way to keep the field out of
+    // the index; an explicit `null` would still be indexed and would make every
+    // unnumbered bill collide with every other one.
     invoiceNumber: {
       type: String,
       trim: true,
       maxlength: 120,
+      set: (value) => {
+        if (value === null || value === undefined) return undefined;
+        const trimmed = String(value).trim();
+        return trimmed === '' ? undefined : trimmed;
+      },
     },
 
     issueDate: { type: Date, default: Date.now },
@@ -164,9 +175,21 @@ const billSchema = new mongoose.Schema(
           lineTotal: major(i.lineTotalMinor),
         }));
 
-        ret.issue_date = ret.issueDate;
-        ret.due_date = ret.dueDate;
-        ret.invoice_number = ret.invoiceNumber;
+        // Calendar days, rendered in local terms. `toISOString()` would convert
+        // local midnight to UTC and roll the date back one day east of UTC,
+        // making the stored document, the JSON and the date input disagree.
+        const dateOnly = (value) => {
+          if (!value) return null;
+          const d = new Date(value);
+          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        };
+
+        ret.issue_date = dateOnly(ret.issueDate);
+        ret.due_date = dateOnly(ret.dueDate);
+        // The field is deliberately absent in storage when there is no invoice
+        // number, so the API reports it as an explicit null — a client can rely
+        // on the key being present either way.
+        ret.invoice_number = ret.invoiceNumber ?? null;
         ret.expense_id = ret.expense ? ret.expense.toString() : null;
         ret.category_id = ret.categoryRef ? ret.categoryRef.toString() : null;
         ret.user_id = ret.user.toString();
@@ -182,11 +205,17 @@ const billSchema = new mongoose.Schema(
 // Statement and list queries: "all bills for this user in this month".
 billSchema.index({ user: 1, issueDate: -1 });
 
-// One bill per vendor+invoice number per user. Sparse so manual bills with no
-// invoice number (field left undefined) do not collide with each other.
+// One bill per vendor+invoice number per user.
+//
+// A *partial* index over documents where `invoiceNumber` is actually a string,
+// rather than a `sparse` one. Sparse only skips documents whose field is
+// entirely missing, so a stored `null` or `''` would still be indexed and would
+// collide with the next unnumbered bill from the same vendor. Matching on the
+// type makes "has a usable invoice number" the literal indexing condition, so
+// the rule holds no matter how the field arrived.
 billSchema.index(
   { user: 1, vendor: 1, invoiceNumber: 1 },
-  { unique: true, sparse: true }
+  { unique: true, partialFilterExpression: { invoiceNumber: { $type: 'string' } } }
 );
 
 export const Bill = mongoose.model('Bill', billSchema);

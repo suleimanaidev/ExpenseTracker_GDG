@@ -16,7 +16,11 @@ export const billUpload = multer({
   limits: {
     fileSize: MAX_BILL_BYTES,
     files: 1,
-    fields: 5,
+    // `/scan` posts no fields, but `POST /api/bills` carries a whole bill as
+    // form data (vendor, dates, four money fields, items, status, notes). The
+    // bound exists to stop a flood of junk keys, not to police the schema —
+    // Zod drops anything it does not recognize a few lines later.
+    fields: 25,
   },
 }).single('bill');
 
@@ -78,6 +82,19 @@ export const verifyBillFile = (req, res, next) => {
   };
 
   return next();
+};
+
+/**
+ * Optional-attachment variant used by `POST /api/bills`, where a manual invoice
+ * legitimately has no document but a reviewed scan should re-upload the one the
+ * user still has in browser memory.
+ *
+ * A present file is held to exactly the same standard as one on `/scan`; an
+ * absent one is not an error.
+ */
+export const verifyOptionalBillFile = (req, res, next) => {
+  if (!req.file) return next();
+  return verifyBillFile(req, res, next);
 };
 
 export { MAX_BILL_BYTES, ACCEPTED_BILL_MIME_TYPES };

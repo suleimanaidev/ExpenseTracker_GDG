@@ -94,6 +94,13 @@ const makeUser = async (email = 'scanner@ledger.app') => {
   return user;
 };
 
+/** A user who already has the "Utilities" category to file bills under. */
+const makeUserWithCategory = async (email) => {
+  const user = await makeUser(email);
+  await Category.create({ user: user._id, name: 'Utilities', color: '#3D405B', icon: 'x' });
+  return user;
+};
+
 const scan = (token) =>
   request(app).post('/api/bills/scan').set('Authorization', `Bearer ${token}`);
 
@@ -704,5 +711,649 @@ describe('POST /api/bills/scan', () => {
     // No GridFS bucket, no uploads directory: the scan is fully transient.
     expect(await Bill.countDocuments()).toBe(0);
     expect(await Expense.countDocuments()).toBe(0);
+  });
+});
+
+describe('Partial unique index on (user, vendor, invoiceNumber)', () => {
+  it('leaves the field absent, so unnumbered bills are not indexed', async () => {
+    // The whole point of the index is that it only covers documents holding a
+    // real invoice number. "Absent" has to mean the key is missing from the
+    // stored document — a stored null or "" would be indexed too, and the
+    // second unnumbered bill from the same vendor would collide with the first.
+    const user = await makeUserWithCategory('noinv@ledger.app');
+    await billsApi(generateAccessToken(user)).create({ ...VALID_BILL, invoiceNumber: undefined });
+
+    const stored = await Bill.collection
+      .find({ user: user._id }, { projection: { vendor: 1, invoiceNumber: 1 } })
+      .toArray();
+
+    expect(stored).toHaveLength(1);
+    const [doc] = stored;
+    expect(Object.prototype.hasOwnProperty.call(doc, 'invoiceNumber')).toBe(false);
+    expect(doc.invoiceNumber).toBeUndefined();
+  });
+
+  it('really does store the field when an invoice number is given', async () => {
+    const user = await makeUserWithCategory('hasinv@ledger.app');
+    await billsApi(generateAccessToken(user)).create(VALID_BILL);
+
+    const doc = await Bill.collection.findOne({ user: user._id });
+    expect(doc.invoiceNumber).toBe('KE-8891');
+  });
+});
+
+// ────────────────────────── CRUD ──────────────────────────
+
+const billsApi = (token) => {
+  const auth = (req) => req.set('Authorization', `Bearer ${token}`);
+  return {
+    list: () => auth(request(app).get('/api/bills')),
+    summary: () => auth(request(app).get('/api/bills/summary')),
+    get: (id) => auth(request(app).get(`/api/bills/${id}`)),
+    create: (body) => auth(request(app).post('/api/bills')).send(body),
+    // supertest refuses to mix .send() with .attach(), so the multipart
+    // variants build their body with .field() only.
+    createWithFile: (fields, file) => {
+      let req = auth(request(app).post('/api/bills'));
+      for (const [key, value] of Object.entries(fields)) {
+        if (value === undefined || value === null) continue;
+        // multipart form-data is flat, so nested values travel as JSON.
+        req = req.field(key, typeof value === 'object' ? JSON.stringify(value) : String(value));
+      }
+      if (file) req = req.attach('bill', file.buffer, file.options);
+      return req;
+    },
+    update: (id, body) => auth(request(app).put(`/api/bills/${id}`)).send(body),
+    patchStatus: (id, body) => auth(request(app).patch(`/api/bills/${id}/status`)).send(body),
+    remove: (id) => auth(request(app).delete(`/api/bills/${id}`)),
+    file: (id) => auth(request(app).get(`/api/bills/${id}/file`)),
+  };
+};
+
+const VALID_BILL = {
+  vendor: 'K-Electric',
+  invoiceNumber: 'KE-8891',
+  issueDate: '2026-02-01',
+  // Far enough out that the derived status is "unpaid"; tests that care about
+  // overdue set their own due date.
+  dueDate: '2099-02-15',
+  currency: 'PKR',
+  category: 'Utilities',
+  subtotal: 4800,
+  tax: 800,
+  discount: 0,
+  total: 5600,
+  items: [{ description: 'Electricity', quantity: 1, unitPrice: 4800, lineTotal: 4800 }],
+};
+
+describe('POST /api/bills', () => {
+  it('creates a bill together with exactly one linked expense', async () => {
+    const user = await makeUserWithCategory('create@ledger.app');
+    const api = billsApi(generateAccessToken(user));
+
+    const res = await api.create(VALID_BILL);
+
+    expect(res.status).toBe(201);
+    expect(res.body.bill).toMatchObject({
+      vendor: 'K-Electric',
+      invoiceNumber: 'KE-8891',
+      currency: 'PKR',
+      category: 'Utilities',
+      status: 'unpaid',
+      total: 5600,
+      subtotal: 4800,
+      tax: 800,
+      source: 'manual',
+    });
+
+    const expenses = await Expense.find({ user: user._id });
+    expect(expenses).toHaveLength(1);
+    expect(expenses[0].amountMinor).toBe(560000);
+    expect(expenses[0].category).toBe('Utilities');
+    expect(expenses[0].date.toISOString().slice(0, 10)).toBe('2026-02-01');
+    // The note explains the transaction without needing a join.
+    expect(expenses[0].note).toContain('K-Electric');
+    expect(expenses[0].note).toContain('KE-8891');
+    expect(res.body.bill.expense_id).toBe(expenses[0]._id.toString());
+  });
+
+  it('stores money as integer minor units and exposes major units', async () => {
+    const user = await makeUserWithCategory('minor@ledger.app');
+    const res = await billsApi(generateAccessToken(user)).create(VALID_BILL);
+
+    const stored = await Bill.findOne({ user: user._id });
+    expect(Number.isInteger(stored.totalMinor)).toBe(true);
+    expect(stored.totalMinor).toBe(560000);
+    expect(res.body.bill.total).toBe(5600);
+  });
+
+  it('rejects a vendor or total that is missing', async () => {
+    const user = await makeUserWithCategory('invalid@ledger.app');
+    const api = billsApi(generateAccessToken(user));
+
+    const noVendor = await api.create({ ...VALID_BILL, vendor: '   ' });
+    expect(noVendor.status).toBe(400);
+
+    const noTotal = await api.create({ ...VALID_BILL, total: undefined, items: [] });
+    expect(noTotal.status).toBe(400);
+    expect(noTotal.body.details.join(' ')).toMatch(/total/i);
+  });
+
+  it('rejects a category the user does not own', async () => {
+    const user = await makeUserWithCategory('badcat@ledger.app');
+    const res = await billsApi(generateAccessToken(user)).create({
+      ...VALID_BILL,
+      category: 'Crypto Gains',
+    });
+
+    expect(res.status).toBe(400);
+    expect(await Bill.countDocuments()).toBe(0);
+    expect(await Expense.countDocuments()).toBe(0);
+  });
+
+  it('derives a missing total from line items rather than failing', async () => {
+    const user = await makeUserWithCategory('derive@ledger.app');
+    const res = await billsApi(generateAccessToken(user)).create({
+      vendor: 'Corner Store',
+      category: 'Utilities',
+      issueDate: '2026-02-01',
+      items: [
+        { description: 'Item A', quantity: 2, unitPrice: 250, lineTotal: 500 },
+        { description: 'Item B', quantity: 1, unitPrice: 100, lineTotal: 100 },
+      ],
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body.bill.total).toBe(600);
+  });
+
+  it('ignores client-supplied ownership fields', async () => {
+    const user = await makeUserWithCategory('escalate@ledger.app');
+    const victim = await makeUser('victim@ledger.app');
+
+    const res = await billsApi(generateAccessToken(user)).create({
+      ...VALID_BILL,
+      user: victim._id.toString(),
+      expense: null,
+      file: { storageKey: 'forged' },
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body.bill.user_id).toBe(user._id.toString());
+    expect(res.body.bill.hasFile).toBe(false);
+    expect(await Expense.countDocuments({ user: victim._id })).toBe(0);
+  });
+
+  it('requires authentication', async () => {
+    const res = await request(app).post('/api/bills').send(VALID_BILL);
+    expect(res.status).toBe(401);
+  });
+});
+
+describe('Duplicate detection', () => {
+  it('rejects the same vendor and invoice number with 409 and returns the match', async () => {
+    const user = await makeUserWithCategory('dupe@ledger.app');
+    const api = billsApi(generateAccessToken(user));
+    const first = await api.create(VALID_BILL);
+
+    const second = await api.create({ ...VALID_BILL, total: 9999 });
+
+    expect(second.status).toBe(409);
+    expect(second.body.code).toBe('DUPLICATE_BILL');
+    expect(second.body.duplicate.id).toBe(first.body.bill.id);
+    // Nothing was written by the rejected attempt.
+    expect(await Bill.countDocuments({ user: user._id })).toBe(1);
+    expect(await Expense.countDocuments({ user: user._id })).toBe(1);
+  });
+
+  it('treats a reused vendor + invoice number as a hard conflict, not a soft one', async () => {
+    // The partial unique index on (user, vendor, invoiceNumber) is authoritative:
+    // "save anyway" cannot override a database constraint, so this stays a 409
+    // and the user is told to change the invoice number.
+    const user = await makeUserWithCategory('dupe6@ledger.app');
+    const api = billsApi(generateAccessToken(user));
+
+    await api.create({ ...VALID_BILL, invoiceNumber: 'KE-1', issueDate: '2026-01-01' });
+
+    const again = await api.create({ ...VALID_BILL, invoiceNumber: 'KE-1', issueDate: '2026-02-01', total: 1200 });
+    expect(again.status).toBe(409);
+    expect(again.body.code).toBe('DUPLICATE_BILL');
+
+    // Nothing was written by the rejected attempt.
+    expect(await Bill.countDocuments({ user: user._id })).toBe(1);
+    expect(await Expense.countDocuments({ user: user._id })).toBe(1);
+  });
+
+  it('lets the user save anyway after seeing the duplicate', async () => {
+    const user = await makeUserWithCategory('dupe3@ledger.app');
+    const api = billsApi(generateAccessToken(user));
+
+    // No invoice number, so the only signal is vendor + total + date.
+    const fields = { ...VALID_BILL, invoiceNumber: undefined, issueDate: '2026-06-06' };
+    await api.create(fields);
+
+    const blocked = await api.create(fields);
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.duplicate.vendor).toBe('K-Electric');
+
+    const forced = await api.create({ ...fields, saveAnyway: true });
+    expect(forced.status).toBe(201);
+    expect(await Bill.countDocuments({ user: user._id })).toBe(2);
+  });
+
+  it('catches a re-upload with the same vendor, total and date but no invoice number', async () => {
+    const user = await makeUserWithCategory('dupe2@ledger.app');
+    const api = billsApi(generateAccessToken(user));
+
+    const first = await api.create({ ...VALID_BILL, invoiceNumber: undefined, issueDate: '2026-05-05' });
+    expect(first.status).toBe(201);
+
+    const second = await api.create({ ...VALID_BILL, invoiceNumber: undefined, issueDate: '2026-05-05' });
+    expect(second.status).toBe(409);
+  });
+
+  it('honours saveAnyway sent as a multipart checkbox field', async () => {
+    // An unchecked HTML checkbox posts as an empty string, which is truthy in
+    // JavaScript. Treating "" as consent would silently bypass duplicate
+    // detection on every saved scanned bill.
+    const user = await makeUserWithCategory('dupe7@ledger.app');
+    const api = billsApi(generateAccessToken(user));
+
+    const fields = { ...VALID_BILL, invoiceNumber: undefined, issueDate: '2026-07-07' };
+    await api.create(fields);
+
+    const sent = await api.createWithFile({ ...fields, saveAnyway: '' });
+    expect(sent.status).toBe(409);
+  });
+
+  it('does not treat a different user\'s identical bill as a duplicate', async () => {
+    const a = await makeUserWithCategory('iso-a@ledger.app');
+    const b = await makeUserWithCategory('iso-b@ledger.app');
+
+    await billsApi(generateAccessToken(a)).create(VALID_BILL);
+    const other = await billsApi(generateAccessToken(b)).create(VALID_BILL);
+
+    expect(other.status).toBe(201);
+  });
+
+  it('allows a different vendor, or the same vendor with a different total', async () => {
+    const user = await makeUserWithCategory('dupe4@ledger.app');
+    const api = billsApi(generateAccessToken(user));
+
+    await api.create(VALID_BILL);
+    expect((await api.create({ ...VALID_BILL, vendor: 'LESCO' })).status).toBe(201);
+    expect(
+      (await api.create({ ...VALID_BILL, invoiceNumber: 'KE-9999', issueDate: '2026-03-11' })).status
+    ).toBe(201);
+  });
+
+  it('leaves invoiceNumber undefined, not null, so unnumbered bills do not collide', async () => {
+    const user = await makeUserWithCategory('dupe5@ledger.app');
+    const api = billsApi(generateAccessToken(user));
+
+    const first = await api.create({ ...VALID_BILL, invoiceNumber: undefined, issueDate: '2026-01-01' });
+    const second = await api.create({ ...VALID_BILL, invoiceNumber: '', issueDate: '2026-01-02' });
+
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    expect(await Bill.countDocuments()).toBe(2);
+  });
+});
+
+describe('GET /api/bills', () => {
+  const seed = async (user) => {
+    const api = billsApi(generateAccessToken(user));
+    await api.create({ ...VALID_BILL, invoiceNumber: 'KE-1', issueDate: '2026-01-05', dueDate: null, status: 'paid' });
+    await api.create({ ...VALID_BILL, invoiceNumber: 'KE-2', issueDate: '2026-02-05', dueDate: '2099-02-20' });
+    await api.create({
+      ...VALID_BILL,
+      vendor: 'LESCO',
+      invoiceNumber: 'LE-3',
+      issueDate: '2026-03-05',
+      dueDate: '2020-03-06',
+      total: 7000,
+    });
+    return api;
+  };
+
+  it('returns only the caller\'s bills, newest first', async () => {
+    const user = await makeUserWithCategory('list@ledger.app');
+    const other = await makeUserWithCategory('other-list@ledger.app');
+    await billsApi(generateAccessToken(other)).create(VALID_BILL);
+
+    const api = await seed(user);
+    const res = await api.list();
+
+    expect(res.status).toBe(200);
+    expect(res.body.total).toBe(3);
+    expect(res.body.bills.map((b) => b.vendor)).toEqual(['LESCO', 'K-Electric', 'K-Electric']);
+  });
+
+  it('filters by status, where overdue is derived from the due date', async () => {
+    const user = await makeUserWithCategory('filter@ledger.app');
+    const api = await seed(user);
+
+    const unpaid = await api.list().query({ status: 'unpaid' });
+    expect(unpaid.body.bills.map((b) => b.invoiceNumber)).toEqual(['KE-2']);
+
+    const paid = await api.list().query({ status: 'paid' });
+    expect(paid.body.bills.map((b) => b.invoiceNumber)).toEqual(['KE-1']);
+
+    const overdue = await api.list().query({ status: 'overdue' });
+    expect(overdue.body.bills.map((b) => b.invoiceNumber)).toEqual(['LE-3']);
+    expect(overdue.body.bills[0].status).toBe('overdue');
+  });
+
+  it('filters by vendor, date range and free-text search', async () => {
+    const user = await makeUserWithCategory('filter2@ledger.app');
+    const api = await seed(user);
+
+    expect((await api.list().query({ vendor: 'lesco' })).body.total).toBe(1);
+
+    const range = await api.list().query({ from: '2026-02-01', to: '2026-02-28' });
+    expect(range.body.bills.map((b) => b.invoiceNumber)).toEqual(['KE-2']);
+
+    expect((await api.list().query({ search: 'KE-2' })).body.total).toBe(1);
+  });
+
+  it('paginates', async () => {
+    const user = await makeUserWithCategory('page@ledger.app');
+    const api = await seed(user);
+
+    const page = await api.list().query({ page: 1, limit: 2 });
+    expect(page.body.bills).toHaveLength(2);
+    expect(page.body).toMatchObject({ total: 3, page: 1, limit: 2, pages: 2 });
+  });
+
+  it('rejects an invalid status filter or date', async () => {
+    const user = await makeUserWithCategory('badfilter@ledger.app');
+    const api = billsApi(generateAccessToken(user));
+
+    expect((await api.list().query({ status: 'nonsense' })).status).toBe(400);
+    expect((await api.list().query({ from: 'not-a-date' })).status).toBe(400);
+  });
+});
+
+describe('Ownership isolation', () => {
+  it('hides another user\'s bill behind 404 on every route', async () => {
+    const owner = await makeUserWithCategory('owner@ledger.app');
+    const intruder = await makeUserWithCategory('intruder@ledger.app');
+
+    const created = await billsApi(generateAccessToken(owner)).create(VALID_BILL);
+    const id = created.body.bill.id;
+
+    const api = billsApi(generateAccessToken(intruder));
+
+    expect((await api.get(id)).status).toBe(404);
+    expect((await api.update(id, { total: 1 })).status).toBe(404);
+    expect((await api.patchStatus(id, { status: 'paid' })).status).toBe(404);
+    expect((await api.remove(id)).status).toBe(404);
+    expect((await api.file(id)).status).toBe(404);
+    expect((await api.list()).body.total).toBe(0);
+  });
+
+  it('does not leak existence via the error message', async () => {
+    const owner = await makeUserWithCategory('owner2@ledger.app');
+    const intruder = await makeUserWithCategory('intruder2@ledger.app');
+    const created = await billsApi(generateAccessToken(owner)).create(VALID_BILL);
+
+    const res = await billsApi(generateAccessToken(intruder)).get(created.body.bill.id);
+    expect(res.body.error).toBe('Bill not found');
+  });
+
+  it('rejects an id that is not a well-formed ObjectId', async () => {
+    const user = await makeUserWithCategory('badid@ledger.app');
+    const res = await billsApi(generateAccessToken(user)).get('not-an-id');
+    expect(res.status).toBe(400);
+  });
+
+  it('404s for a well-formed id that belongs to nobody', async () => {
+    const user = await makeUserWithCategory('ghostid@ledger.app');
+    const res = await billsApi(generateAccessToken(user)).get('0123456789abcdef01234567');
+    expect(res.status).toBe(404);
+  });
+});
+
+describe('PUT /api/bills/:id', () => {
+  it('applies a partial update without blanking untouched fields', async () => {
+    const user = await makeUserWithCategory('patch@ledger.app');
+    const api = billsApi(generateAccessToken(user));
+    const created = await api.create(VALID_BILL);
+
+    const res = await api.update(created.body.bill.id, { status: 'paid' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.bill.status).toBe('paid');
+    expect(res.body.bill.vendor).toBe('K-Electric');
+    expect(res.body.bill.total).toBe(5600);
+    expect(res.body.bill.issueDate).toBeTruthy();
+  });
+
+  it('keeps the linked expense in step with the bill', async () => {
+    const user = await makeUserWithCategory('sync@ledger.app');
+    const api = billsApi(generateAccessToken(user));
+    const created = await api.create(VALID_BILL);
+
+    await api.update(created.body.bill.id, { total: 7200, vendor: 'LESCO', issueDate: '2026-03-09' });
+
+    const expense = await Expense.findOne({ user: user._id });
+    expect(expense.amountMinor).toBe(720000);
+    expect(expense.note).toContain('LESCO');
+    expect(expense.date.toISOString().slice(0, 10)).toBe('2026-03-09');
+    expect(await Expense.countDocuments({ user: user._id })).toBe(1);
+  });
+
+  it('normalizes a stored overdue status to unpaid, since overdue is derived', async () => {
+    const user = await makeUserWithCategory('derive-status@ledger.app');
+    const api = billsApi(generateAccessToken(user));
+    // A due date already in the past, so the derived status is genuinely
+    // overdue while the stored status stays unpaid.
+    const created = await api.create({ ...VALID_BILL, dueDate: '2020-01-01' });
+    expect(created.body.bill.status).toBe('overdue');
+
+    const res = await api.update(created.body.bill.id, { status: 'overdue' });
+    expect(res.body.bill.status).toBe('overdue');
+
+    const stored = await Bill.findById(created.body.bill.id);
+    expect(stored.status).toBe('unpaid');
+  });
+
+  it('rejects an invalid body without changing anything', async () => {
+    const user = await makeUserWithCategory('badpatch@ledger.app');
+    const api = billsApi(generateAccessToken(user));
+    const created = await api.create(VALID_BILL);
+
+    expect((await api.update(created.body.bill.id, { status: 'refunded' })).status).toBe(400);
+    expect((await api.update(created.body.bill.id, { total: -50 })).status).toBe(400);
+
+    const unchanged = await Bill.findById(created.body.bill.id);
+    expect(unchanged.totalMinor).toBe(560000);
+  });
+});
+
+describe('PATCH /api/bills/:id/status', () => {
+  it('marks a bill paid and stamps paidAt', async () => {
+    const user = await makeUserWithCategory('status@ledger.app');
+    const api = billsApi(generateAccessToken(user));
+    const created = await api.create(VALID_BILL);
+
+    const res = await api.patchStatus(created.body.bill.id, { status: 'paid' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.bill.status).toBe('paid');
+    expect(res.body.bill.paidAt).toBeTruthy();
+  });
+
+  it('rejects an unknown status', async () => {
+    const user = await makeUserWithCategory('badstatus@ledger.app');
+    const api = billsApi(generateAccessToken(user));
+    const created = await api.create(VALID_BILL);
+
+    expect((await api.patchStatus(created.body.bill.id, { status: 'late' })).status).toBe(400);
+  });
+});
+
+describe('DELETE /api/bills/:id', () => {
+  it('removes the bill and its linked expense', async () => {
+    const user = await makeUserWithCategory('delete@ledger.app');
+    const api = billsApi(generateAccessToken(user));
+    const created = await api.create(VALID_BILL);
+
+    const res = await api.remove(created.body.bill.id);
+
+    expect(res.status).toBe(200);
+    expect(await Bill.countDocuments({ user: user._id })).toBe(0);
+    expect(await Expense.countDocuments({ user: user._id })).toBe(0);
+  });
+
+  it('leaves another user\'s bill and expense untouched when a delete misses', async () => {
+    const owner = await makeUserWithCategory('del-owner@ledger.app');
+    const other = await makeUserWithCategory('del-other@ledger.app');
+    const ownerBill = await billsApi(generateAccessToken(owner)).create(VALID_BILL);
+    const otherBill = await billsApi(generateAccessToken(other)).create(VALID_BILL);
+
+    await billsApi(generateAccessToken(owner)).remove(otherBill.body.bill.id);
+
+    expect(await Bill.countDocuments({ user: other._id })).toBe(1);
+    expect(await Expense.countDocuments({ user: other._id })).toBe(1);
+    expect(ownerBill.status).toBe(201);
+  });
+});
+
+describe('GET /api/bills/:id/file', () => {
+  it('streams a stored attachment to its owner with hardening headers', async () => {
+    const user = await makeUserWithCategory('file@ledger.app');
+    const api = billsApi(generateAccessToken(user));
+
+    const created = await api.createWithFile(VALID_BILL, {
+      buffer: PNG,
+      options: { filename: 'my bill.png', contentType: 'image/png' },
+    });
+
+    expect(created.status).toBe(201);
+    expect(created.body.bill.hasFile).toBe(true);
+
+    const res = await api.file(created.body.bill.id);
+
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/image\/png/);
+    expect(res.headers['x-content-type-options']).toBe('nosniff');
+    expect(res.headers['cache-control']).toBe('private, no-store');
+    expect(res.headers['content-disposition']).toMatch(/^inline; filename="/);
+  });
+
+  it('sanitizes the stored filename before echoing it in Content-Disposition', async () => {
+    const user = await makeUserWithCategory('sanitize@ledger.app');
+    const api = billsApi(generateAccessToken(user));
+
+    const created = await api.createWithFile(VALID_BILL, {
+      buffer: PNG,
+      options: { filename: '../../etc/passwd.png', contentType: 'image/png' },
+    });
+
+    const res = await api.file(created.body.bill.id);
+    expect(res.headers['content-disposition']).not.toContain('..');
+    expect(res.headers['content-disposition']).toContain('passwd.png');
+  });
+
+  it('offers the attachment as a download on request', async () => {
+    const user = await makeUserWithCategory('download@ledger.app');
+    const api = billsApi(generateAccessToken(user));
+    const created = await api.createWithFile(VALID_BILL, {
+      buffer: PDF,
+      options: { filename: 'statement.pdf', contentType: 'application/pdf' },
+    });
+
+    const res = await request(app)
+      .get(`/api/bills/${created.body.bill.id}/file?download=1`)
+      .set('Authorization', `Bearer ${generateAccessToken(user)}`);
+
+    expect(res.headers['content-disposition']).toMatch(/^attachment/);
+    expect(res.headers['content-type']).toMatch(/application\/pdf/);
+  });
+
+  it('404s for a bill that legitimately has no attachment', async () => {
+    const user = await makeUserWithCategory('nofile@ledger.app');
+    const api = billsApi(generateAccessToken(user));
+    const created = await api.create(VALID_BILL);
+
+    const res = await api.file(created.body.bill.id);
+    expect(res.status).toBe(404);
+    expect(res.body.error).toMatch(/no attached document/i);
+  });
+
+  it('requires authentication', async () => {
+    const user = await makeUserWithCategory('fileauth@ledger.app');
+    const api = billsApi(generateAccessToken(user));
+    const created = await api.createWithFile(VALID_BILL, {
+      buffer: PNG,
+      options: { filename: 'b.png', contentType: 'image/png' },
+    });
+
+    const res = await request(app).get(`/api/bills/${created.body.bill.id}/file`);
+    expect(res.status).toBe(401);
+  });
+
+  it('rejects a disguised file attached at save time, just like the scanner', async () => {
+    const user = await makeUserWithCategory('filebad@ledger.app');
+    const api = billsApi(generateAccessToken(user));
+
+    const res = await api.createWithFile(VALID_BILL, {
+      buffer: PHP_WEBSHELL,
+      options: { filename: 'invoice.png', contentType: 'image/png' },
+    });
+
+    expect(res.status).toBe(400);
+    expect(await Bill.countDocuments()).toBe(0);
+    expect(await Expense.countDocuments()).toBe(0);
+  });
+
+  it('stores the attachment itself, not just its metadata', async () => {
+    const user = await makeUserWithCategory('gridfs@ledger.app');
+    const api = billsApi(generateAccessToken(user));
+    const created = await api.createWithFile(VALID_BILL, {
+      buffer: PNG,
+      options: { filename: 'receipt.png', contentType: 'image/png' },
+    });
+
+    const stored = await Bill.findById(created.body.bill.id);
+    expect(stored.file.storageKey).toBeTruthy();
+
+    const bytes = await request(app)
+      .get(`/api/bills/${created.body.bill.id}/file`)
+      .set('Authorization', `Bearer ${generateAccessToken(user)}`)
+      .buffer()
+      .parse((res, cb) => {
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => cb(null, Buffer.concat(chunks)));
+      });
+
+    expect(Buffer.compare(bytes.body, PNG)).toBe(0);
+  });
+});
+
+describe('GET /api/bills/summary', () => {
+  it('returns totals, upcoming bills and due-soon alerts', async () => {
+    const user = await makeUserWithCategory('summary@ledger.app');
+    const api = billsApi(generateAccessToken(user));
+
+    const day = 24 * 60 * 60 * 1000;
+    const iso = (offset) => new Date(Date.now() + offset).toISOString().slice(0, 10);
+
+    await api.create({ ...VALID_BILL, invoiceNumber: 'A', total: 1000, dueDate: iso(-day) });
+    await api.create({ ...VALID_BILL, invoiceNumber: 'B', total: 2000, dueDate: iso(2 * day) });
+    await api.create({ ...VALID_BILL, invoiceNumber: 'C', total: 3000, status: 'paid', dueDate: iso(day) });
+
+    const res = await api.summary();
+
+    expect(res.status).toBe(200);
+    expect(res.body.summary).toMatchObject({ billCount: 3, total: 6000, totalPaid: 3000 });
+    expect(res.body.summary.counts).toMatchObject({ overdue: 1, unpaid: 1, paid: 1 });
+    expect(res.body.upcoming.map((b) => b.invoiceNumber)).toContain('A');
+    // The paid bill is not upcoming.
+    expect(res.body.upcoming.map((b) => b.invoiceNumber)).not.toContain('C');
+    // Due-soon alerts exclude the already-overdue bill.
+    expect(res.body.dueSoon.map((b) => b.invoiceNumber)).toEqual(['B']);
   });
 });
