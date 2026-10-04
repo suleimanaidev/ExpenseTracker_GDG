@@ -58,6 +58,28 @@ npm run dev
 
 Open http://localhost:5173.
 
+### Troubleshooting: port 5000 already in use
+
+Only one backend process should run on port `5000`. If `npm run dev:backend`
+reports `EADDRINUSE`, the API is usually already running. Verify it first:
+
+```powershell
+Invoke-WebRequest http://localhost:5000/api/health
+```
+
+If the health check returns `200`, keep the existing backend running and do not
+start a second copy. To intentionally restart it, find the listener PID and stop
+only that process:
+
+```powershell
+netstat -ano | Select-String ':5000'
+Stop-Process -Id <PID>
+npm run dev:backend
+```
+
+To use another port instead, set `PORT` in `backend/.env` and update
+`frontend/.env` so `VITE_API_URL` points to the same port.
+
 Seeded credentials:
 
 | Role | Email | Password |

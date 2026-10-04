@@ -1,4 +1,4 @@
-import { useLocation, Link } from 'react-router-dom';
+import { useLocation, Link, useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import { useAuth } from '../lib/AuthContext';
 
@@ -54,13 +54,19 @@ const NAV_ITEMS = [
 
 export default function Sidebar({ onCollapseChange }) {
   const { pathname } = useLocation();
-  const { user, profile } = useAuth();
+  const { user, profile, signOut } = useAuth();
+  const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
 
   const handleToggleCollapse = () => {
     const next = !collapsed;
     setCollapsed(next);
     if (onCollapseChange) onCollapseChange(next);
+  };
+
+  const handleLogout = async () => {
+    await signOut();
+    navigate('/login');
   };
 
   // Dynamically push Admin item if user has is_admin role
@@ -126,6 +132,21 @@ export default function Sidebar({ onCollapseChange }) {
             );
           })}
         </nav>
+        <button
+          type="button"
+          className="sidebar-logout"
+          onClick={handleLogout}
+          title={collapsed ? 'Log out' : undefined}
+        >
+          <span className="sidebar-link-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M10 17l5-5-5-5" />
+              <path d="M15 12H3" />
+              <path d="M21 19V5a2 2 0 0 0-2-2h-6" />
+            </svg>
+          </span>
+          {!collapsed && <span className="sidebar-link-label">Log out</span>}
+        </button>
 
       </aside>
 

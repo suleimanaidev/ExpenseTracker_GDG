@@ -1,25 +1,97 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useData } from '../lib/DataContext';
 import { useAuth } from '../lib/AuthContext';
 import { DEFAULT_CATEGORIES } from '../lib/categories';
-import { useNavigate } from 'react-router-dom';
 import ThemeToggleMouse from '../components/ThemeToggleMouse';
+
+const CATEGORY_ICON_OPTIONS = [
+  { icon: '🍔', label: 'Food' },
+  { icon: '☕', label: 'Drinks' },
+  { icon: '🚗', label: 'Transport' },
+  { icon: '🛍️', label: 'Shopping' },
+  { icon: '🏠', label: 'Home' },
+  { icon: '💡', label: 'Bills' },
+  { icon: '💊', label: 'Health' },
+  { icon: '📚', label: 'Education' },
+  { icon: '✈️', label: 'Travel' },
+  { icon: '🐾', label: 'Pets' },
+  { icon: '🏋️', label: 'Fitness' },
+  { icon: '🎁', label: 'Gifts' },
+  { icon: '🎬', label: 'Entertainment' },
+  { icon: '💼', label: 'Work' },
+  { icon: '📦', label: 'Other' },
+  { icon: '💰', label: 'Savings' },
+  { icon: '💳', label: 'Card' },
+  { icon: '🏦', label: 'Bank' },
+  { icon: '🧾', label: 'Invoice' },
+  { icon: '📱', label: 'Phone' },
+  { icon: '🌐', label: 'Internet' },
+  { icon: '💧', label: 'Water' },
+  { icon: '🔥', label: 'Gas' },
+  { icon: '🛒', label: 'Groceries' },
+  { icon: '🍕', label: 'Restaurant' },
+  { icon: '🍎', label: 'Health Food' },
+  { icon: '👕', label: 'Clothing' },
+  { icon: '💄', label: 'Beauty' },
+  { icon: '💇', label: 'Salon' },
+  { icon: '⚽', label: 'Sports' },
+  { icon: '🎮', label: 'Games' },
+  { icon: '🎵', label: 'Music' },
+  { icon: '📺', label: 'Streaming' },
+  { icon: '📖', label: 'Books' },
+  { icon: '🧑‍🎓', label: 'Courses' },
+  { icon: '👶', label: 'Kids' },
+  { icon: '👨‍👩‍👧', label: 'Family' },
+  { icon: '🐶', label: 'Dog' },
+  { icon: '🐱', label: 'Cat' },
+  { icon: '🌿', label: 'Garden' },
+  { icon: '🔧', label: 'Repair' },
+  { icon: '🧹', label: 'Cleaning' },
+  { icon: '🎉', label: 'Events' },
+  { icon: '🙏', label: 'Charity' },
+  { icon: '🛡️', label: 'Insurance' },
+  { icon: '🚕', label: 'Taxi' },
+  { icon: '⛽', label: 'Fuel' },
+  { icon: '🅿️', label: 'Parking' },
+  { icon: '🏨', label: 'Hotel' },
+  { icon: '📬', label: 'Delivery' },
+];
 
 export default function SettingsPage() {
   const {
     loaded, budget, categories, currency, joinedAt,
     setBudget, addCategory, removeCategory, setCurrency, clearAllData,
   } = useData();
-  const { user, configured, signOut } = useAuth();
-  const navigate = useNavigate();
+  const { user, configured } = useAuth();
 
   const [budgetDraft, setBudgetDraft] = useState('');
   const [newCatName, setNewCatName] = useState('');
+  const [newCatIcon, setNewCatIcon] = useState('📌');
+  const [showIconPicker, setShowIconPicker] = useState(false);
+  const [iconSearch, setIconSearch] = useState('');
   const [newCatColor, setNewCatColor] = useState('#00A19B');
+  const iconPickerRef = useRef(null);
   const [showConfirm, setShowConfirm] = useState(false);
   const [budgetSaved, setBudgetSaved] = useState(false);
 
   const defaultNames = DEFAULT_CATEGORIES.map(c => c.name);
+
+  useEffect(() => {
+    const handleOutsideClick = (event) => {
+      if (iconPickerRef.current && !iconPickerRef.current.contains(event.target)) {
+        setShowIconPicker(false);
+      }
+    };
+    const handleEscape = (event) => {
+      if (event.key === 'Escape') setShowIconPicker(false);
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, []);
 
   function handleSaveBudget() {
     const num = parseFloat(budgetDraft || budget);
@@ -33,18 +105,16 @@ export default function SettingsPage() {
   function handleAddCategory(e) {
     e.preventDefault();
     if (!newCatName.trim()) return;
-    addCategory(newCatName.trim(), newCatColor, '📌');
+    addCategory(newCatName.trim(), newCatColor, newCatIcon.trim() || '📌');
     setNewCatName('');
+    setNewCatIcon('📌');
+    setIconSearch('');
+    setShowIconPicker(false);
   }
 
   function handleClearAll() {
     clearAllData();
     setShowConfirm(false);
-  }
-
-  async function handleLogout() {
-    await signOut();
-    navigate('/login');
   }
 
   const joinDateFormatted = joinedAt
@@ -120,13 +190,74 @@ export default function SettingsPage() {
             </div>
           ))}
         </div>
+        <div className="settings-section-description" style={{ marginBottom: '0.75rem' }}>
+          Add a name, icon, and color for your custom category.
+        </div>
         <form className="add-category-row" onSubmit={handleAddCategory}>
           <input
             type="text"
             value={newCatName}
             onChange={e => setNewCatName(e.target.value)}
-            placeholder="New category name (e.g. Milk 🥛)"
+            placeholder="Category name (e.g. Milk)"
+            aria-label="New category name"
           />
+          <div className="category-icon-dropdown" ref={iconPickerRef}>
+            <button
+              type="button"
+              className="category-icon-trigger"
+              onClick={() => setShowIconPicker(prev => !prev)}
+              aria-haspopup="listbox"
+              aria-expanded={showIconPicker}
+              aria-label="Choose category icon"
+              title="Choose category icon"
+            >
+              <span>{newCatIcon}</span>
+              <span className="category-icon-trigger-label">Icon</span>
+              <span className="category-icon-chevron" aria-hidden="true">⌄</span>
+            </button>
+            {showIconPicker && (
+              <div className="category-icon-menu" role="listbox" aria-label="Category icons">
+                <input
+                  type="search"
+                  value={iconSearch}
+                  onChange={e => setIconSearch(e.target.value)}
+                  placeholder="Search icons..."
+                  aria-label="Search category icons"
+                  className="category-icon-search"
+                />
+                {CATEGORY_ICON_OPTIONS
+                  .filter(option => option.label.toLowerCase().includes(iconSearch.toLowerCase()))
+                  .map(option => (
+                  <button
+                    key={option.label}
+                    type="button"
+                    className={`category-icon-option ${newCatIcon === option.icon ? 'category-icon-option--selected' : ''}`}
+                    onClick={() => {
+                      setNewCatIcon(option.icon);
+                      setShowIconPicker(false);
+                    }}
+                    role="option"
+                    aria-selected={newCatIcon === option.icon}
+                    aria-label={option.label}
+                    title={option.label}
+                  >
+                    {option.icon}
+                  </button>
+                ))}
+                {CATEGORY_ICON_OPTIONS.filter(option => option.label.toLowerCase().includes(iconSearch.toLowerCase())).length === 0 && (
+                  <span className="category-icon-empty">No matching icons. Use a custom emoji below.</span>
+                )}
+                <input
+                  type="text"
+                  value={newCatIcon}
+                  onChange={e => setNewCatIcon(e.target.value.slice(0, 8))}
+                  placeholder="Custom"
+                  aria-label="Custom category icon"
+                  className="category-icon-custom-input"
+                />
+              </div>
+            )}
+          </div>
           <input
             type="color"
             value={newCatColor}
@@ -156,15 +287,6 @@ export default function SettingsPage() {
             <p>Switch between light and dark mode.</p>
           </div>
           <ThemeToggleMouse />
-        </div>
-        <div className="settings-preference-row settings-preference-row--logout">
-          <div>
-            <strong>Session</strong>
-            <p>Sign out of your Ledger account on this device.</p>
-          </div>
-          <button type="button" className="btn btn--danger" onClick={handleLogout}>
-            Log out
-          </button>
         </div>
       </div>
 

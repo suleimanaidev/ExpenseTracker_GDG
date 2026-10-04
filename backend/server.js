@@ -130,11 +130,29 @@ app.use(errorHandler);
 
 // ─── Start ───
 if (!isTest) {
-  connectDB().then(() => {
-    app.listen(PORT, () => {
-      console.log(`Ledger API listening on http://localhost:${PORT}`);
+  connectDB()
+    .then(() => {
+      const server = app.listen(PORT, () => {
+        console.log(`Ledger API listening on http://localhost:${PORT}`);
+      });
+
+      server.on('error', (error) => {
+        if (error.code === 'EADDRINUSE') {
+          console.error(
+            `Port ${PORT} is already in use. The Ledger backend may already be running. ` +
+            `Stop the existing process or use a different PORT before starting another server.`
+          );
+          process.exitCode = 1;
+          server.close(() => process.exit(1));
+          return;
+        }
+        console.error('Ledger API failed to start:', error);
+      });
+    })
+    .catch((error) => {
+      console.error('Ledger API failed to connect to MongoDB:', error.message);
+      process.exitCode = 1;
     });
-  });
 }
 
 export default app;
