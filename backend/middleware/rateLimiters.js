@@ -53,6 +53,12 @@ class ResilientStore {
         sendCommand: (...args) => getRedis().call(...args),
       });
       store.init?.(this.options);
+      // The store loads its Lua scripts in the constructor and keeps the promises. If
+      // Redis drops at that moment they reject with nobody awaiting them yet, which
+      // Node treats as an unhandled rejection and can kill the process. Marking them
+      // handled is safe: increment still awaits them and our fallback catches it.
+      store.incrementScriptSha?.catch?.(() => {});
+      store.getScriptSha?.catch?.(() => {});
       this.redisStore = store;
     }
     return this.redisStore;
