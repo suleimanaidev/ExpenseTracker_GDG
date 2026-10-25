@@ -1,115 +1,121 @@
 import { useEffect, useRef, useState } from 'react';
 import { useData } from '../lib/DataContext';
-import { useAuth } from '../lib/AuthContext';
-import { formatCurrency } from '../lib/categories';
+import { useToast } from '../lib/ToastContext';
 import api from '../lib/api';
+import { toPlainText } from '../lib/plainText';
+import { confidenceLevel } from '../lib/confidence';
+import { formatCurrency } from '../lib/categories';
+import PageSkeleton from '../components/PageSkeleton';
+import ChatSidebar from '../components/ChatSidebar';
+import '../styles/chat-page.css';
 
 export default function InsightsPage() {
   const {
-    loaded, totalSpent, budget, remaining, byCategory,
-    monthEntries, daysLeft, currency,
-    messages, setMessages, insight, setInsight,
-    categories, addEntry, reload,
+    loaded,
+    currency,
+    messages,
+    setMessages,
+    chatLoading,
+    sendChatMessage,
+    resetChat,
+    conversations,
+    conversationId,
+    historyEnabled,
+    openConversation,
+    deleteConversation,
+    renameConversation,
+    categories,
+    reload,
   } = useData();
-  const { user } = useAuth();
-
-  const fmt = (n) => formatCurrency(n, currency);
-
-  const [insightLoading, setInsightLoading] = useState(false);
-  const [insightError, setInsightError] = useState('');
+  const { notify } = useToast();
   const [chatInput, setChatInput] = useState('');
-  const [chatLoading, setChatLoading] = useState(false);
   const [attachment, setAttachment] = useState(null);
   const [attachmentError, setAttachmentError] = useState('');
   const [listening, setListening] = useState(false);
   const [billNote, setBillNote] = useState('');
-  const [duplicateBill, setDuplicateBill] = useState(null);
+  const [voiceError, setVoiceError] = useState('');
+  const [dragging, setDragging] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const fileInputRef = useRef(null);
   const recognitionRef = useRef(null);
+  const messagesEndRef = useRef(null);
+  const textareaRef = useRef(null);
 
   const examples = [
-    'kal 500 ka petrol dalwaya',
-    '200 chai, 1500 uber yesterday',
     'is mahine food par kitna kharch hua?',
+    'where did most of my money go?',
+    'how much budget is left?',
+    'how much did I spend on transport?',
   ];
 
-  const speechSupported = typeof window !== 'undefined'
-    && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
+  const speechSupported =
+    typeof window !== 'undefined' &&
+    ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
 
   useEffect(() => () => recognitionRef.current?.stop(), []);
 
-  async function getInsight() {
-    setInsightLoading(true);
-    setInsightError('');
-    try {
-      const data = await api.post('/api/insight', {
-        clientData: {
-          budget,
-          currency,
-          entries: monthEntries,
-        },
-      });
-      setInsight(data.insight);
-    } catch (err) {
-      setInsightError(err.message || 'Failed to fetch AI spending insight.');
-    } finally {
-      setInsightLoading(false);
-    }
-  }
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [messages, chatLoading]);
+
+  // Grow the composer with its content, up to a readable ceiling.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [chatInput]);
 
   async function sendChat(e, overrideQuestion = null) {
     e?.preventDefault();
-    const q = (overrideQuestion || chatInput).trim();
+    const q = (overrideQuestion ?? chatInput).trim();
     if ((!q && !attachment) || chatLoading) return;
 
-    const userMsg = { role: 'user', text: q };
-    setMessages(prev => [...prev, userMsg]);
-    setChatInput('');
-    const selectedFile = attachment;
-    setAttachment(null);
-    setChatLoading(true);
+    // Hand the work (and the in-flight request) to the shared data layer so
+    // leaving the page cannot cancel the answer or clear the conversation.
+    const file = attachment;
+    const note = billNote.trim();
 
-    try {
-      let data;
-      if (selectedFile) {
-        const form = new FormData();
-        form.append('question', billNote.trim() || q);
-        form.append('history', JSON.stringify(messages.slice(-6).map(m => ({ role: m.role, text: m.text }))));
-        form.append('bill', selectedFile);
-        data = await api.post('/api/insight/chat', form);
-        setBillNote('');
-      } else {
-        data = await api.post('/api/insight/chat', {
-          question: q,
-          history: messages.slice(-6).map(m => ({ role: m.role, text: m.text })),
-          clientData: { budget, currency, entries: monthEntries },
-        });
-      }
-      setMessages(prev => [...prev, {
-        role: 'ai',
-        text: data.reply || data.answers || data.insight || 'I could not understand that request.',
-        proposal: data.proposal || null,
-      }]);
-    } catch (err) {
-      setMessages(prev => [...prev, { role: 'ai', text: `Error: ${err.message}` }]);
-    } finally {
-      setChatLoading(false);
-    }
+    setChatInput('');
+    setAttachment(null);
+    setBillNote('');
+    setAttachmentError('');
+    setVoiceError('');
+
+    await sendChatMessage({ question: q, file, note });
+  }
+
+  function startNewChat() {
+    resetChat();
+    setAttachment(null);
+    setAttachmentError('');
+    setVoiceError('');
+    setBillNote('');
+    setHistoryOpen(false);
   }
 
   async function validateAttachment(file) {
     setAttachmentError('');
+    setVoiceError('');
+
+    if (!file) return;
+
     const allowed = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
     if (!allowed.includes(file.type) || file.size > 8 * 1024 * 1024) {
       setAttachmentError('Attach a JPG, PNG, WEBP, or PDF up to 8 MB.');
       return;
     }
     const header = new Uint8Array(await file.slice(0, 12).arrayBuffer());
-    const signature = Array.from(header).map(byte => byte.toString(16).padStart(2, '0')).join('');
-    const valid = (file.type === 'application/pdf' && signature.startsWith('25504446'))
-      || (file.type === 'image/png' && signature.startsWith('89504e47'))
-      || (file.type === 'image/jpeg' && signature.startsWith('ffd8ff'))
-      || (file.type === 'image/webp' && signature.startsWith('52494646') && signature.slice(16, 24) === '57454250');
+    const signature = Array.from(header)
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('');
+    const valid =
+      (file.type === 'application/pdf' && signature.startsWith('25504446')) ||
+      (file.type === 'image/png' && signature.startsWith('89504e47')) ||
+      (file.type === 'image/jpeg' && signature.startsWith('ffd8ff')) ||
+      (file.type === 'image/webp' &&
+        signature.startsWith('52494646') &&
+        signature.slice(16, 24) === '57454250');
     if (!valid) {
       setAttachmentError('The file signature does not match its declared type.');
       return;
@@ -117,200 +123,402 @@ export default function InsightsPage() {
     setAttachment(file);
   }
 
+  function stopListening() {
+    recognitionRef.current?.stop();
+    setListening(false);
+  }
+
   function startListening() {
-    if (!speechSupported || listening) return;
+    if (!speechSupported) {
+      setVoiceError('Voice input is not supported in this browser. Try Chrome or Edge.');
+      return;
+    }
+    if (listening) {
+      stopListening();
+      return;
+    }
+
+    setVoiceError('');
+    setAttachmentError('');
+
     const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognition = new Recognition();
-    recognition.lang = 'en-IN';
-    recognition.interimResults = false;
-    recognition.onresult = event => {
-      const transcript = event.results?.[0]?.[0]?.transcript || '';
-      setChatInput(prev => `${prev}${prev ? ' ' : ''}${transcript}`.slice(0, 500));
+    const baseInput = chatInput.trim();
+
+    recognition.lang = navigator.language || 'en-IN';
+    recognition.continuous = true;
+    recognition.interimResults = true;
+
+    recognition.onresult = (event) => {
+      let finalText = '';
+      let interimText = '';
+      for (let i = 0; i < event.results.length; i += 1) {
+        const result = event.results[i];
+        const transcript = result[0]?.transcript || '';
+        if (result.isFinal) finalText += transcript;
+        else interimText += transcript;
+      }
+      const joined = `${baseInput}${baseInput ? ' ' : ''}${finalText}${interimText}`;
+      setChatInput(joined.slice(0, 500));
     };
+
+    recognition.onerror = (event) => {
+      setListening(false);
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        setVoiceError(
+          'Microphone permission is blocked. Allow microphone access in your browser, then try again.'
+        );
+      } else if (event.error === 'no-speech') {
+        setVoiceError('No speech detected. Tap the mic and speak again.');
+      } else if (event.error !== 'aborted') {
+        setVoiceError('Voice input stopped unexpectedly. Please try again.');
+      }
+    };
+
     recognition.onend = () => setListening(false);
-    recognition.onerror = () => setListening(false);
     recognitionRef.current = recognition;
     setListening(true);
-    recognition.start();
+
+    try {
+      recognition.start();
+    } catch {
+      setListening(false);
+      setVoiceError('Voice input could not start. Please try again.');
+    }
   }
 
   async function confirmProposal(proposal, messageIndex) {
     try {
-      if (proposal.type === 'expenses') {
-        for (const item of proposal.data.items) {
-          await addEntry(item.amount, item.category || categories[0]?.name || 'Other', item.note, item.date);
-        }
-        setMessages(prev => prev.map((msg, index) => index === messageIndex
-          ? { ...msg, proposal: null, text: `${proposal.data.items.length} expense${proposal.data.items.length === 1 ? '' : 's'} added successfully.` }
-          : msg));
-      } else {
-        await api.post('/api/bills', {
-          vendor: proposal.data.vendor,
-          invoiceNumber: proposal.data.invoiceNumber || null,
-          issueDate: proposal.data.issueDate,
-          dueDate: proposal.data.dueDate,
-          currency: proposal.data.currency || currency,
-          items: proposal.data.items,
-          subtotal: proposal.data.subtotal,
-          tax: proposal.data.tax,
-          discount: proposal.data.discount,
-          total: proposal.data.total,
-          category: proposal.data.suggestedCategory || categories[0]?.name || 'Other',
-          status: 'unpaid',
-          notes: billNote,
-        });
-        setMessages(prev => prev.map((msg, index) => index === messageIndex
-          ? { ...msg, proposal: null, text: 'Bill saved successfully.' } : msg));
-      }
+      const payload = {
+        vendor: proposal.data.vendor,
+        invoiceNumber: proposal.data.invoiceNumber || null,
+        issueDate: proposal.data.issueDate,
+        dueDate: proposal.data.dueDate,
+        currency: proposal.data.currency || currency,
+        items: proposal.data.items,
+        subtotal: proposal.data.subtotal,
+        tax: proposal.data.tax,
+        discount: proposal.data.discount,
+        total: proposal.data.total,
+        category:
+          proposal.data.category ||
+          proposal.data.suggestedCategory ||
+          categories[0]?.name ||
+          'Other',
+        status: proposal.data.status || 'unpaid',
+        notes: proposal.note || '',
+        confidence: proposal.data.confidence,
+        source: proposal.attachment ? 'scanned' : 'manual',
+      };
+      await saveBillProposal(payload, proposal.attachment);
+      setMessages((prev) =>
+        prev.map((msg, index) =>
+          index === messageIndex
+            ? { ...msg, proposal: null, text: 'Bill saved successfully.' }
+            : msg
+        )
+      );
       await reload();
     } catch (err) {
-      if (proposal.type === 'bill' && err.status === 409) setDuplicateBill({ proposal, messageIndex });
-      else setInsightError(err.message || 'Could not save this proposal.');
+      notify(
+        err.status === 409
+          ? 'This bill already exists and was not saved again.'
+          : err.message || 'Could not save this bill.',
+        'error'
+      );
     }
   }
 
-  async function saveDuplicateAnyway() {
-    if (!duplicateBill) return;
-    const { proposal, messageIndex } = duplicateBill;
-    setDuplicateBill(null);
-    try {
-      await api.post('/api/bills', {
-        ...proposal.data,
-        category: proposal.data.suggestedCategory || 'Other',
-        status: 'unpaid',
-        saveAnyway: true,
-      });
-      setMessages(prev => prev.map((msg, index) => index === messageIndex
-        ? { ...msg, proposal: null, text: 'Bill saved successfully.' } : msg));
-      await reload();
-    } catch (err) {
-      setInsightError(err.message || 'Could not save this bill.');
-    }
+  async function saveBillProposal(payload, file) {
+    if (!file) return api.post('/api/bills', payload);
+
+    const form = new FormData();
+    Object.entries(payload).forEach(([key, value]) => {
+      if (value === undefined || value === null || value === '') return;
+      form.append(key, key === 'items' ? JSON.stringify(value) : String(value));
+    });
+    form.append('bill', file);
+    return api.post('/api/bills', form);
   }
 
-  if (!loaded) return <div className="page-header"><h1 className="font-display">Loading...</h1></div>;
+  if (!loaded) return <PageSkeleton label="Loading Ledger AI" />;
 
   return (
-    <>
-      <div className="page-header">
-        <div className="page-header-label">AI Insights</div>
-        <h1>What the data says.</h1>
-      </div>
+    <div className="chat-app">
+      <ChatSidebar
+        conversations={conversations}
+        activeId={conversationId}
+        enabled={historyEnabled}
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        onNew={startNewChat}
+        onOpen={openConversation}
+        onDelete={deleteConversation}
+        onRename={renameConversation}
+      />
 
-      {/* Main Insight Panel */}
-      <div className="card card--gradient mb-6 insights-analysis-card">
-        <div className="insights-card-header">
-          <div>
-            <h2 className="insight-card-title">AI Financial Analysis</h2>
+      <div
+        className={`card insights-chat-card chatgpt${dragging ? ' is-dragging' : ''}`}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget)) setDragging(false);
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragging(false);
+          const file = e.dataTransfer.files?.[0];
+          if (file) validateAttachment(file);
+        }}
+      >
+        <div className="chat-header">
+          <div className="chat-header-identity">
+            <button
+              type="button"
+              className="chat-history-toggle"
+              onClick={() => setHistoryOpen((open) => !open)}
+              aria-label="Show chat history"
+              aria-expanded={historyOpen}
+              aria-controls="chat-history"
+            >
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.9"
+                strokeLinecap="round"
+                aria-hidden="true"
+              >
+                <path d="M4 6h16M4 12h16M4 18h10" />
+              </svg>
+            </button>
+            <span className="chat-ai-avatar" aria-hidden="true">
+              ✦
+            </span>
+            <div>
+              <h3>Ledger AI</h3>
+              <p>Your money, explained.</p>
+            </div>
           </div>
-          <button
-            onClick={getInsight}
-            disabled={insightLoading}
-            className="btn btn--primary"
-          >
-            {insightLoading ? 'Analyzing Transactions...' : (insight ? 'Refresh Analysis' : 'Generate Insight')}
+          <button type="button" className="chat-clear-button" onClick={startNewChat}>
+            New chat
           </button>
         </div>
 
-        {insightError && (
-          <div className="alert alert--error mb-4">{insightError}</div>
-        )}
-
-        {insight ? (
-          <div className="insight-body whitespace-pre-wrap leading-relaxed text-secondary" style={{ fontSize: '1.05rem', lineHeight: '1.7' }}>
-            {insight}
-          </div>
-        ) : (
-          <div className="insight-empty-state text-muted text-sm">
-            Click &quot;Generate Insight&quot; to analyze your {monthEntries.length} transactions for this month and receive personalized budgeting recommendations.
-          </div>
-        )}
-      </div>
-
-      {/* Interactive Chat Box */}
-      <div className="card insights-chat-card">
-        <div className="card-header mb-4">
-          <h3 className="insight-card-title">Ask Ledger AI</h3>
-        </div>
-
-        <div className="chat-messages mb-4" style={{ maxHeight: '350px', overflowY: 'auto' }}>
+        <div className="chat-messages" aria-live="polite">
           {messages.length === 0 && (
-            <div className="chat-empty-state">
-              <p className="text-muted text-sm">Ask a question or describe an expense to add it after review.</p>
-              <div className="chat-example-list">
-                {examples.map(example => (
-                  <button key={example} type="button" className="btn btn--ghost btn--sm" onClick={() => setChatInput(example)}>
+            <div className="chat-welcome">
+              <span className="chat-welcome-mark" aria-hidden="true">
+                ✦
+              </span>
+              <h4>How can I help with your money?</h4>
+              <p>
+                Ask about spending, check your budget, or scan a bill in plain English or Roman
+                Urdu.
+              </p>
+              <div className="chat-suggestions">
+                {examples.map((example) => (
+                  <button
+                    key={example}
+                    type="button"
+                    className="chat-suggestion"
+                    onClick={() => sendChat(null, example)}
+                  >
                     {example}
                   </button>
                 ))}
               </div>
             </div>
           )}
-          {messages.length > 0 && (
-            messages.map((msg, idx) => (
-              <div key={idx}>
-                <div className={`chat-bubble ${msg.role === 'user' ? 'chat-bubble--user' : 'chat-bubble--ai'}`}>
-                  <div className="chat-bubble-role">{msg.role === 'user' ? 'You' : 'Ledger AI'}</div>
-                  <div className="whitespace-pre-wrap">{msg.text}</div>
+          {messages.length > 0 &&
+            messages.map((msg, idx) => {
+              // An AI bubble that exists only as a stream placeholder has
+              // nothing to show yet; the typing dots cover that moment.
+              if (!msg.text && !msg.proposal) return null;
+
+              return (
+                <div
+                  key={idx}
+                  className={`chat-row ${msg.role === 'user' ? 'chat-row--user' : 'chat-row--ai'}`}
+                >
+                  {msg.role !== 'user' && (
+                    <span className="chat-ai-avatar chat-ai-avatar--small" aria-hidden="true">
+                      ✦
+                    </span>
+                  )}
+                  <div
+                    className={`chat-bubble ${msg.role === 'user' ? 'chat-bubble--user' : 'chat-bubble--ai'}`}
+                  >
+                    <div className="chat-bubble-text">{toPlainText(msg.text)}</div>
+                    {msg.proposal?.type === 'bill' && (
+                      <ProposalCard
+                        proposal={msg.proposal}
+                        categories={categories}
+                        onConfirm={(nextProposal) => confirmProposal(nextProposal, idx)}
+                        onCancel={() =>
+                          setMessages((prev) =>
+                            prev.map((item, index) =>
+                              index === idx ? { ...item, proposal: null } : item
+                            )
+                          )
+                        }
+                      />
+                    )}
+                  </div>
                 </div>
-                {msg.proposal && (
-                  <ProposalCard
-                    proposal={msg.proposal}
-                    categories={categories}
-                    onConfirm={(nextProposal) => confirmProposal(nextProposal, idx)}
-                    onCancel={() => setMessages(prev => prev.map((item, index) => index === idx ? { ...item, proposal: null } : item))}
-                  />
-                )}
+              );
+            })}
+          {chatLoading && (
+            <div className="chat-row chat-row--ai">
+              <span className="chat-ai-avatar chat-ai-avatar--small" aria-hidden="true">
+                ✦
+              </span>
+              <div
+                className="chat-bubble chat-bubble--ai chat-typing"
+                aria-label="Ledger AI is thinking"
+              >
+                <span />
+                <span />
+                <span />
               </div>
-            ))
+            </div>
           )}
-          {chatLoading && <div className="chat-bubble chat-bubble--ai chat-loading-dots" aria-label="Ledger AI is thinking">•••</div>}
+          <div ref={messagesEndRef} />
         </div>
 
-        <form onSubmit={sendChat} className="chat-input-row">
-          <div className="chat-question-field">
-            {attachment && (
-              <div className="chat-file-chip">
-                <span>{attachment.name}</span>
-                <button type="button" onClick={() => setAttachment(null)} aria-label="Remove attachment">×</button>
+        <form onSubmit={sendChat} className="chat-composer">
+          {attachment && (
+            <div className="chat-attachment">
+              <span className="chat-attachment-icon" aria-hidden="true">
+                📄
+              </span>
+              <div>
+                <strong>{attachment.name}</strong>
+                <small>{Math.max(1, Math.round(attachment.size / 1024))} KB</small>
               </div>
-            )}
-            {attachment && (
-              <input value={billNote} onChange={e => setBillNote(e.target.value.slice(0, 500))} className="form-input" placeholder="Optional note for this bill..." />
-            )}
-            {attachmentError && <div className="form-error">{attachmentError}</div>}
+              <button
+                type="button"
+                onClick={() => setAttachment(null)}
+                aria-label="Remove attachment"
+              >
+                ×
+              </button>
+            </div>
+          )}
+
+          {attachment && (
+            <input
+              value={billNote}
+              onChange={(e) => setBillNote(e.target.value.slice(0, 500))}
+              className="form-input chat-bill-note"
+              placeholder="Optional note for this bill..."
+              aria-label="Bill note"
+            />
+          )}
+
+          {(attachmentError || voiceError) && (
+            <div className="form-error" role="alert">
+              {attachmentError || voiceError}
+            </div>
+          )}
+
+          {listening && (
+            <div className="chat-listening" role="status">
+              <span className="chat-listening-dot" aria-hidden="true" />
+              Listening… speak now, then tap the mic to stop.
+            </div>
+          )}
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            hidden
+            accept=".jpg,.jpeg,.png,.webp,.pdf"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) validateAttachment(file);
+              // Reset so selecting the same file again still fires onChange.
+              e.target.value = '';
+            }}
+          />
+
+          <div className="chat-composer-box">
+            <button
+              type="button"
+              className="chat-tool-button"
+              onClick={() => fileInputRef.current?.click()}
+              aria-label="Attach bill or receipt"
+              title="Attach bill or receipt (or drop a file)"
+            >
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+              </svg>
+            </button>
+
             <textarea
-              className="form-input"
-              placeholder="Ask a question or add expenses..."
+              ref={textareaRef}
+              className="chat-textarea"
+              placeholder="Message Ledger AI..."
               value={chatInput}
               maxLength={500}
               rows={1}
-              onChange={e => setChatInput(e.target.value.slice(0, 500))}
-              onKeyDown={e => {
+              onChange={(e) => setChatInput(e.target.value.slice(0, 500))}
+              onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
                   sendChat(e);
                 }
               }}
               disabled={chatLoading}
+              aria-label="Message Ledger AI"
             />
-            <div className="chat-input-actions">
-              <input ref={fileInputRef} type="file" hidden accept=".jpg,.jpeg,.png,.webp,.pdf" onChange={e => e.target.files?.[0] && validateAttachment(e.target.files[0])} />
-              <button type="button" className="chat-tool-button" onClick={() => fileInputRef.current?.click()} aria-label="Attach bill or receipt" title="Attach bill or receipt">
-                <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true">
-                  <path d="M12 5v14M5 12h14" />
-                </svg>
-              </button>
-              {speechSupported && <button type="button" className={`chat-tool-button ${listening ? 'is-listening' : ''}`} onClick={startListening} aria-label="Use voice input" title={listening ? 'Listening...' : 'Use voice input'}>
-                <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true">
-                  <rect x="9" y="3" width="6" height="11" rx="3" />
-                  <path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8" />
-                </svg>
-              </button>}
-            </div>
+
+            <button
+              type="button"
+              className={`chat-tool-button chat-mic-button${listening ? ' is-listening' : ''}`}
+              onClick={startListening}
+              disabled={!speechSupported}
+              aria-label={listening ? 'Stop voice input' : 'Use voice input'}
+              title={
+                !speechSupported
+                  ? 'Voice input is not supported in this browser'
+                  : listening
+                    ? 'Stop listening'
+                    : 'Use voice input'
+              }
+            >
+              <svg
+                width="19"
+                height="19"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.9"
+                strokeLinecap="round"
+                aria-hidden="true"
+              >
+                <rect x="9" y="3" width="6" height="11" rx="3" />
+                <path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8" />
+              </svg>
+            </button>
+
             <button
               type="submit"
-              className="btn btn--primary chat-send-button"
+              className="chat-send-button"
               disabled={chatLoading || (!chatInput.trim() && !attachment)}
               aria-label={chatLoading ? 'Sending question' : 'Send question'}
               title={chatLoading ? 'Sending question' : 'Send question'}
@@ -318,64 +526,247 @@ export default function InsightsPage() {
               {chatLoading ? (
                 <span className="chat-send-spinner" aria-hidden="true" />
               ) : (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="m22 2-7 20-4-9-9-4Z" />
-                  <path d="M22 2 11 13" />
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M12 19V5M5 12l7-7 7 7" />
                 </svg>
               )}
             </button>
           </div>
+
+          <p className="chat-composer-hint">
+            Enter to send · Shift + Enter for a new line · JPG, PNG, WEBP or PDF up to 8 MB
+          </p>
         </form>
-      </div>
-      {duplicateBill && (
-        <div className="modal-backdrop" role="dialog" aria-modal="true">
-          <div className="modal">
-            <h3>Possible duplicate bill</h3>
-            <p>This bill may already exist. Save it anyway?</p>
-            <div className="modal-actions">
-              <button className="btn btn--ghost" onClick={() => setDuplicateBill(null)}>Cancel</button>
-              <button className="btn btn--primary" onClick={saveDuplicateAnyway}>Save anyway</button>
-            </div>
+
+        {dragging && (
+          <div className="chat-drop-overlay" aria-hidden="true">
+            <span>Drop a bill here to scan it</span>
           </div>
-        </div>
-      )}
-    </>
+        )}
+      </div>
+    </div>
   );
 }
 
 function ProposalCard({ proposal, categories, onConfirm, onCancel }) {
   const [data, setData] = useState(proposal.data);
-  const updateExpense = (index, field, value) => setData(prev => ({
-    ...prev,
-    items: prev.items.map((item, itemIndex) => itemIndex === index ? { ...item, [field]: field === 'amount' ? Number(value) : value } : item),
-  }));
-  const updateBill = (field, value) => setData(prev => ({ ...prev, [field]: field === 'total' ? Number(value) : value }));
-  const billTotal = proposal.type === 'bill'
-    ? data.items.reduce((sum, item) => sum + Number(item.lineTotal || 0), 0) + Number(data.tax || 0) - Number(data.discount || 0)
-    : 0;
+  const updateBill = (field, value) =>
+    setData((prev) => ({
+      ...prev,
+      [field]: ['total', 'subtotal', 'tax', 'discount'].includes(field) ? Number(value) : value,
+    }));
+  const updateBillItem = (index, field, value) =>
+    setData((prev) => ({
+      ...prev,
+      items: (prev.items || []).map((item, itemIndex) =>
+        itemIndex === index
+          ? {
+              ...item,
+              [field]: ['quantity', 'unitPrice', 'lineTotal'].includes(field)
+                ? Number(value)
+                : value,
+            }
+          : item
+      ),
+    }));
+  const billTotal =
+    (data.items || []).reduce((sum, item) => sum + Number(item.lineTotal || 0), 0) +
+    Number(data.tax || 0) -
+    Number(data.discount || 0);
 
   return (
     <div className="proposal-card">
-      <div className="proposal-card-header"><strong>{proposal.type === 'bill' ? 'Review bill' : 'Review expenses'}</strong><span>{Math.round((data.confidence || 0) * 100)}% confidence</span></div>
-      {proposal.type === 'expenses' ? data.items.map((item, index) => (
-        <div className={`proposal-row ${item.confidence < 0.5 ? 'proposal-row--low-confidence' : ''}`} key={`${item.note}-${index}`}>
-          <input className="form-input" type="number" min="0.01" value={item.amount} onChange={e => updateExpense(index, 'amount', e.target.value)} />
-          <select className="form-input" value={item.category || ''} onChange={e => updateExpense(index, 'category', e.target.value)}>
-            <option value="">Choose category</option>{categories.map(category => <option key={category.name || category} value={category.name || category}>{category.name || category}</option>)}
-          </select>
-          <input className="form-input" value={item.note || ''} onChange={e => updateExpense(index, 'note', e.target.value)} aria-label="Expense note" />
+      <div className="proposal-card-header">
+        <strong>Review bill</strong>
+        <span
+          className={`confidence-pill confidence-pill--${confidenceLevel(data.confidence).key}`}
+        >
+          {Math.round((Number(data.confidence) || 0) * 100)}% confidence
+        </span>
+      </div>
+      <div className="review-hero">
+        <div className="review-hero-vendor">{data.vendor || 'Unknown vendor'}</div>
+        <div className="review-hero-amount num">
+          {formatCurrency(Number(data.total) || 0, data.currency || 'PKR')}
         </div>
-      )) : (
-        <>
-          <input className="form-input" value={data.vendor} onChange={e => updateBill('vendor', e.target.value)} placeholder="Vendor" />
-          <input className="form-input" type="number" value={data.total} onChange={e => updateBill('total', e.target.value)} placeholder="Total" />
-          <p className="text-muted text-sm">Calculated line total: {billTotal.toFixed(2)} {data.currency || ''}</p>
-          {data.warnings?.map(warning => <div className="alert alert--warning" key={warning}>{warning}</div>)}
-        </>
-      )}
+      </div>
+      <p className="text-muted text-sm" style={{ margin: '0 0 0.5rem' }}>
+        Nothing is saved until you confirm below.
+      </p>
+      <>
+        {proposal.attachment && (
+          <p className="text-muted text-sm">Attachment: {proposal.attachment.name}</p>
+        )}
+        <div className="proposal-row">
+          <input
+            className="form-input"
+            value={data.vendor || ''}
+            onChange={(e) => updateBill('vendor', e.target.value)}
+            placeholder="Vendor"
+            aria-label="Vendor"
+          />
+          <input
+            className="form-input"
+            value={data.invoiceNumber || ''}
+            onChange={(e) => updateBill('invoiceNumber', e.target.value)}
+            placeholder="Invoice number"
+            aria-label="Invoice number"
+          />
+          <select
+            className="form-input"
+            value={data.category || data.suggestedCategory || ''}
+            onChange={(e) => updateBill('category', e.target.value)}
+            aria-label="Category"
+          >
+            <option value="">Choose category</option>
+            {categories.map((category) => (
+              <option key={category.name || category} value={category.name || category}>
+                {category.name || category}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="proposal-row">
+          <input
+            className="form-input"
+            type="date"
+            value={data.issueDate || ''}
+            onChange={(e) => updateBill('issueDate', e.target.value)}
+            aria-label="Issue date"
+          />
+          <input
+            className="form-input"
+            type="date"
+            value={data.dueDate || ''}
+            onChange={(e) => updateBill('dueDate', e.target.value)}
+            aria-label="Due date"
+          />
+          <select
+            className="form-input"
+            value={data.currency || 'PKR'}
+            onChange={(e) => updateBill('currency', e.target.value)}
+            aria-label="Currency"
+          >
+            {['PKR', 'USD', 'EUR', 'GBP', 'INR'].map((code) => (
+              <option key={code} value={code}>
+                {code}
+              </option>
+            ))}
+          </select>
+        </div>
+        {(data.items || []).map((item, index) => (
+          <div className="proposal-row" key={`${item.description}-${index}`}>
+            <input
+              className="form-input"
+              value={item.description || ''}
+              onChange={(e) => updateBillItem(index, 'description', e.target.value)}
+              placeholder="Item"
+              aria-label={`Item ${index + 1} description`}
+            />
+            <input
+              className="form-input"
+              type="number"
+              min="0"
+              step="any"
+              value={item.quantity ?? 1}
+              onChange={(e) => updateBillItem(index, 'quantity', e.target.value)}
+              placeholder="Qty"
+              aria-label={`Item ${index + 1} quantity`}
+            />
+            <input
+              className="form-input"
+              type="number"
+              min="0"
+              step="0.01"
+              value={item.unitPrice ?? ''}
+              onChange={(e) => updateBillItem(index, 'unitPrice', e.target.value)}
+              placeholder="Unit price"
+              aria-label={`Item ${index + 1} unit price`}
+            />
+            <input
+              className="form-input"
+              type="number"
+              min="0"
+              step="0.01"
+              value={item.lineTotal ?? ''}
+              onChange={(e) => updateBillItem(index, 'lineTotal', e.target.value)}
+              placeholder="Line total"
+              aria-label={`Item ${index + 1} total`}
+            />
+          </div>
+        ))}
+        <div className="proposal-row">
+          <input
+            className="form-input"
+            type="number"
+            min="0"
+            step="0.01"
+            value={data.subtotal ?? ''}
+            onChange={(e) => updateBill('subtotal', e.target.value)}
+            placeholder="Subtotal"
+            aria-label="Subtotal"
+          />
+          <input
+            className="form-input"
+            type="number"
+            min="0"
+            step="0.01"
+            value={data.tax ?? ''}
+            onChange={(e) => updateBill('tax', e.target.value)}
+            placeholder="Tax"
+            aria-label="Tax"
+          />
+          <input
+            className="form-input"
+            type="number"
+            min="0"
+            step="0.01"
+            value={data.discount ?? ''}
+            onChange={(e) => updateBill('discount', e.target.value)}
+            placeholder="Discount"
+            aria-label="Discount"
+          />
+          <input
+            className="form-input"
+            type="number"
+            min="0.01"
+            step="0.01"
+            value={data.total ?? ''}
+            onChange={(e) => updateBill('total', e.target.value)}
+            placeholder="Total"
+            aria-label="Total"
+          />
+        </div>
+        <p className="text-muted text-sm">
+          Calculated line total: {billTotal.toFixed(2)} {data.currency || ''}
+        </p>
+        {data.warnings?.map((warning) => (
+          <div className="alert alert--warning" key={warning}>
+            {warning}
+          </div>
+        ))}
+      </>
       <div className="proposal-actions">
-        <button type="button" className="btn btn--ghost" onClick={onCancel}>Cancel</button>
-        <button type="button" className="btn btn--primary" onClick={() => onConfirm({ ...proposal, data })}>{proposal.type === 'bill' ? 'Save bill' : 'Confirm all'}</button>
+        <button type="button" className="btn btn--ghost" onClick={onCancel}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="btn btn--primary"
+          onClick={() => onConfirm({ ...proposal, data })}
+        >
+          Save bill
+        </button>
       </div>
     </div>
   );

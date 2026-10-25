@@ -26,6 +26,7 @@ import expenseRoutes from './routes/expenseRoutes.js';
 import aiRoutes from './routes/aiRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import billRoutes from './routes/billRoutes.js';
+import chatRoutes from './routes/chatRoutes.js';
 
 validateEnvironment();
 
@@ -150,6 +151,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api', profileRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/expenses', expenseRoutes);
+app.use('/api/chats', chatRoutes);
 app.use('/api', aiRoutes);
 app.use('/api/admin', adminRoutes);
 
