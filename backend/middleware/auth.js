@@ -1,8 +1,17 @@
 import jwt from 'jsonwebtoken';
 import { User } from '../models/User.js';
 
-export const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'ledger_jwt_access_secret_key_default_3821';
-export const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'ledger_jwt_refresh_secret_key_default_9482';
+// Secrets are read at call time rather than at module evaluation. That keeps the
+// values correct regardless of when dotenv ran, and lets tests exercise the
+// environment without reloading this module.
+const DEFAULT_ACCESS_SECRET = 'ledger_jwt_access_secret_key_default_3821';
+const DEFAULT_REFRESH_SECRET = 'ledger_jwt_refresh_secret_key_default_9482';
+
+export const getAccessTokenSecret = () =>
+  process.env.JWT_ACCESS_SECRET || DEFAULT_ACCESS_SECRET;
+
+export const getRefreshTokenSecret = () =>
+  process.env.JWT_REFRESH_SECRET || DEFAULT_REFRESH_SECRET;
 
 export const ACCESS_TOKEN_EXPIRY = '15m';
 export const REFRESH_TOKEN_EXPIRY = '7d';
@@ -16,7 +25,7 @@ export const generateAccessToken = (user) => {
       id: user._id.toString(),
       email: user.email,
     },
-    JWT_ACCESS_SECRET,
+    getAccessTokenSecret(),
     { expiresIn: ACCESS_TOKEN_EXPIRY }
   );
 };
@@ -29,7 +38,7 @@ export const generateRefreshToken = (user) => {
     {
       id: user._id.toString(),
     },
-    JWT_REFRESH_SECRET,
+    getRefreshTokenSecret(),
     { expiresIn: REFRESH_TOKEN_EXPIRY }
   );
 };
@@ -57,7 +66,7 @@ export const authenticate = async (req, res, next) => {
 
     let decoded;
     try {
-      decoded = jwt.verify(token, JWT_ACCESS_SECRET);
+      decoded = jwt.verify(token, getAccessTokenSecret());
     } catch (jwtErr) {
       if (jwtErr.name === 'TokenExpiredError') {
         return res.status(401).json({

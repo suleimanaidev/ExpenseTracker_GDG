@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import rateLimit from 'express-rate-limit';
 import {
   register,
   login,
@@ -10,18 +9,14 @@ import {
 } from '../controllers/authController.js';
 import { authenticate } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
+import {
+  loginEmailLimiter,
+  loginIpLimiter,
+  refreshLimiter,
+  registerLimiter,
+} from '../middleware/rateLimiters.js';
 
 const router = Router();
-
-// Stricter rate limiting for auth endpoints (15 requests per 15 minutes)
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 30,
-  message: { error: 'Too many authentication attempts, please try again after 15 minutes.' },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
 const registerSchema = {
   body: z.object({
     email: z.string().email('Please enter a valid email address'),
@@ -37,10 +32,12 @@ const loginSchema = {
   }),
 };
 
-router.post('/register', authLimiter, validate(registerSchema), register);
-router.post('/login', authLimiter, validate(loginSchema), login);
+router.post('/register', registerLimiter, validate(registerSchema), register);
+// Two independent budgets: one per IP, one per email, so a single account cannot be
+// guessed from many addresses and a shared IP is not locked out by one user's typos.
+router.post('/login', loginIpLimiter, loginEmailLimiter, validate(loginSchema), login);
 router.post('/logout', logout);
-router.post('/refresh', refresh);
+router.post('/refresh', refreshLimiter, refresh);
 router.get('/me', authenticate, getMe);
 
 export default router;

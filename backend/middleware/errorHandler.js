@@ -5,11 +5,18 @@
 export const errorHandler = (err, req, res, next) => {
   console.error('Unhandled error:', err);
 
-  const statusCode = err.statusCode || res.statusCode === 200 ? 500 : res.statusCode;
+  const requestedStatus = Number(err.statusCode);
+  const responseStatus = res.statusCode >= 400 ? res.statusCode : 500;
+  const statusCode = requestedStatus >= 400 && requestedStatus <= 599
+    ? requestedStatus
+    : responseStatus;
   const isProduction = process.env.NODE_ENV === 'production';
+  const message = isProduction && statusCode >= 500
+    ? 'Internal Server Error'
+    : (err.message || 'Internal Server Error');
 
   res.status(statusCode).json({
-    error: err.message || 'Internal Server Error',
+    error: message,
     ...(isProduction ? {} : { stack: err.stack }),
   });
 };

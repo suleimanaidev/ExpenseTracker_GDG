@@ -1,5 +1,10 @@
 import multer from 'multer';
-import { MAX_BILL_BYTES, ACCEPTED_BILL_MIME_TYPES, validateBillBuffer } from '../utils/fileSignature.js';
+import {
+  MAX_BILL_BYTES,
+  ACCEPTED_BILL_MIME_TYPES,
+  validateBillBuffer,
+  formatByteLimit,
+} from '../utils/fileSignature.js';
 
 /**
  * Multipart upload handling for the bill scanner.
@@ -34,7 +39,7 @@ export const handleBillUpload = (req, res, next) => {
     if (err instanceof multer.MulterError) {
       if (err.code === 'LIMIT_FILE_SIZE') {
         return res.status(413).json({
-          error: 'File is too large. Maximum allowed size is 8 MB.',
+          error: `File is too large. Maximum allowed size is ${formatByteLimit()}.`,
           code: 'FILE_TOO_LARGE',
         });
       }

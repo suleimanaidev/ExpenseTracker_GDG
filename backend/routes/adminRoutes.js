@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import {
   getOverviewStats,
@@ -26,16 +25,9 @@ import {
 import { authenticate } from '../middleware/auth.js';
 import { requireAdmin } from '../middleware/admin.js';
 import { validate } from '../middleware/validate.js';
+import { adminLimiter } from '../middleware/rateLimiters.js';
 
 const router = Router();
-
-const adminLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 120,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many admin requests. Please try again shortly.' },
-});
 
 const objectId = z.string().regex(/^[a-f\d]{24}$/i, 'Invalid id');
 const rangeQuery = {
@@ -54,7 +46,8 @@ const usersQuery = {
   }).passthrough(),
 };
 
-router.use(adminLimiter, authenticate, requireAdmin);
+// The limiter runs after authentication so it can key on the admin user, not the IP.
+router.use(authenticate, requireAdmin, adminLimiter);
 
 router.get('/stats', validate(rangeQuery), getOverviewStats);
 router.get('/charts', validate(rangeQuery), getCharts);
