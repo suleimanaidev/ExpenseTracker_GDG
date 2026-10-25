@@ -3,8 +3,8 @@
 
 .chat-app {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
-  gap: 16px;
+  grid-template-columns: 224px minmax(0, 1fr);
+  gap: 12px;
   height: calc(100dvh - 3rem);
   min-height: 520px;
 }
@@ -25,27 +25,27 @@
 .chat-sidebar {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
   min-height: 0;
-  padding: 14px;
+  padding: 10px;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 1.25rem;
+  border-radius: 1rem;
 }
 
 .chat-new-button {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
-  padding: 11px 14px;
+  padding: 7px 10px;
   font: inherit;
-  font-size: 0.9rem;
+  font-size: 0.82rem;
   font-weight: 600;
   color: var(--gold);
   background: var(--gold-dim);
   border: 1px solid color-mix(in srgb, var(--gold) 35%, var(--border));
-  border-radius: 12px;
+  border-radius: 9px;
   cursor: pointer;
   transition:
     background-color 0.2s ease,
@@ -69,20 +69,20 @@
 }
 
 .chat-history-note {
-  margin: 8px 6px;
-  font-size: 0.82rem;
+  margin: 6px 4px;
+  font-size: 0.76rem;
   line-height: 1.55;
   color: var(--text-muted);
 }
 
 .chat-history-group {
-  margin-bottom: 14px;
+  margin-bottom: 8px;
 }
 
 .chat-history-group h3 {
-  margin: 0 0 6px;
-  padding: 0 8px;
-  font-size: 0.7rem;
+  margin: 0 0 3px;
+  padding: 0 6px;
+  font-size: 0.64rem;
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -99,7 +99,7 @@
   position: relative;
   display: flex;
   align-items: center;
-  border-radius: 10px;
+  border-radius: 8px;
   transition: background-color 0.15s ease;
 }
 
@@ -116,9 +116,9 @@
 .chat-history-open {
   flex: 1;
   min-width: 0;
-  padding: 9px 10px;
+  padding: 5px 8px;
   font: inherit;
-  font-size: 0.88rem;
+  font-size: 0.8rem;
   color: var(--text-secondary);
   text-align: left;
   background: none;
@@ -148,8 +148,8 @@
 .chat-history-actions button {
   display: grid;
   place-items: center;
-  min-width: 26px;
-  height: 26px;
+  min-width: 22px;
+  height: 22px;
   padding: 0 4px;
   color: var(--text-muted);
   background: none;
@@ -184,9 +184,9 @@
 .chat-history-rename {
   width: 100%;
   margin: 3px 0;
-  padding: 7px 10px;
+  padding: 5px 8px;
   font: inherit;
-  font-size: 0.88rem;
+  font-size: 0.8rem;
   color: var(--text-primary);
   background: var(--bg-card);
   border: 1px solid var(--gold);
