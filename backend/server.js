@@ -1,13 +1,23 @@
+// Load `.env` before any other import. ES modules evaluate imports in source
+// order, and modules such as middleware/auth.js read process.env as they are
+// evaluated. Calling dotenv.config() later in this file would therefore be too
+// late: the server would silently fall back to the hardcoded development
+// secrets even when JWT_ACCESS_SECRET/JWT_REFRESH_SECRET are set in `.env`.
+import 'dotenv/config';
+
 import express from 'express';
+import mongoose from 'mongoose';
 import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
-import rateLimit from 'express-rate-limit';
 import mongoSanitize from 'express-mongo-sanitize';
-import dotenv from 'dotenv';
 
 import { connectDB, isDBConnected, pingDB } from './config/db.js';
+import { validateEnvironment } from './config/env.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import { requireOperational, readMaintenanceMode } from './middleware/maintenance.js';
+import { globalLimiter, warnIfRedisMissing } from './middleware/rateLimiters.js';
+import { closeRedis, pingRedis } from './config/redis.js';
 
 import authRoutes from './routes/authRoutes.js';
 import profileRoutes from './routes/profileRoutes.js';
@@ -17,9 +27,26 @@ import aiRoutes from './routes/aiRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import billRoutes from './routes/billRoutes.js';
 
-dotenv.config();
+validateEnvironment();
 
 const app = express();
+
+/**
+ * Behind Render, Railway, Vercel or any reverse proxy, every request reaches the
+ * app from the proxy's address. Without `trust proxy`, `req.ip` is that one address
+ * for everybody, so all users would share a single rate-limit bucket and one noisy
+ * client could lock everyone out. TRUST_PROXY is the number of proxy hops to trust
+ * (default 1 in production, off in development). It must match reality: trusting too
+ * many hops lets a client forge X-Forwarded-For and dodge its own limit.
+ */
+const parseTrustProxy = (value) => {
+  if (value === undefined || value === '') return process.env.NODE_ENV === 'production' ? 1 : false;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  const hops = Number(value);
+  return Number.isInteger(hops) && hops >= 0 ? hops : value;
+};
+app.set('trust proxy', parseTrustProxy(process.env.TRUST_PROXY));
 const PORT = process.env.PORT || 5000;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 
@@ -65,20 +92,11 @@ app.use(mongoSanitize());
 app.use(cookieParser());
 
 /**
- * Baseline abuse ceiling for the whole API. Per-route limiters (login, AI,
- * bill scanning) sit in front of this and are far tighter where an endpoint
- * costs money or unlocks an account.
+ * Baseline abuse ceiling for the whole API (see middleware/rateLimiters.js for the
+ * limit, store and 429 shape). Per-route limiters sit in front of this and are far
+ * tighter where an endpoint costs money or unlocks an account.
  */
-const generalLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 120,
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: () => isTest,
-  message: { error: 'Too many requests. Please slow down and try again shortly.' },
-});
-
-app.use('/api', generalLimiter);
+app.use('/api', globalLimiter);
 
 // ─── Service metadata ───
 app.get('/', async (req, res) => {
@@ -101,14 +119,32 @@ app.get('/', async (req, res) => {
 });
 
 app.get('/api/health', async (req, res) => {
-  const db = await pingDB();
+  const [db, redis] = await Promise.all([pingDB(), pingRedis()]);
+  let maintenance = false;
+
+  if (db.ok) {
+    try {
+      maintenance = await readMaintenanceMode();
+    } catch {
+      // If the setting cannot be read, the API should keep serving rather than
+      // appearing to be in maintenance.
+      maintenance = false;
+    }
+  }
+
   res.status(db.ok ? 200 : 503).json({
     status: db.ok ? 'ok' : 'degraded',
     server: 'Ledger Backend (Express)',
     database: db.ok ? 'connected' : db.error,
+    redis,
+    maintenance,
     port: PORT,
   });
 });
+
+// Block non-admin API traffic while an administrator has maintenance mode on.
+// Auth routes that let an admin sign in are exempted inside the middleware.
+app.use('/api', requireOperational);
 
 app.use('/api/auth', authRoutes);
 app.use('/api', profileRoutes);
@@ -130,11 +166,25 @@ app.use(errorHandler);
 
 // ─── Start ───
 if (!isTest) {
+  warnIfRedisMissing();
   connectDB()
     .then(() => {
       const server = app.listen(PORT, () => {
         console.log(`Ledger API listening on http://localhost:${PORT}`);
       });
+
+      const shutdown = (signal) => {
+        console.log(`${signal} received, shutting down`);
+        server.close(async () => {
+          await closeRedis();
+          await mongoose.connection.close().catch(() => {});
+          process.exit(0);
+        });
+        // A stuck connection must not keep the process alive forever.
+        setTimeout(() => process.exit(1), 10_000).unref();
+      };
+      process.once('SIGTERM', () => shutdown('SIGTERM'));
+      process.once('SIGINT', () => shutdown('SIGINT'));
 
       server.on('error', (error) => {
         if (error.code === 'EADDRINUSE') {

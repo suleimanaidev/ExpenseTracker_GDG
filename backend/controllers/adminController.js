@@ -7,12 +7,14 @@ import { Category } from '../models/Category.js';
 import { AuditLog } from '../models/AuditLog.js';
 import { AiUsage } from '../models/AiUsage.js';
 import { PlatformSettings } from '../models/PlatformSettings.js';
+import { invalidateMaintenanceCache } from '../middleware/maintenance.js';
 import { pingDB } from '../config/db.js';
 import { openBillFile } from '../services/billStorageService.js';
 import { getPlatformStats } from '../services/statsService.js';
 import { writeAuditLog } from '../services/auditService.js';
 import { deleteBillFile } from '../services/billStorageService.js';
 import { generateAIChatResponse } from '../services/aiService.js';
+import { pingRedis } from '../config/redis.js';
 
 const statsCache = new Map();
 const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -513,10 +515,13 @@ export const getAdminHealth = async (req, res, next) => {
   try {
     const startedAt = Date.now();
     const database = await pingDB();
+    const databaseLatencyMs = Date.now() - startedAt;
+    const redis = await pingRedis();
     return res.json({
       api: 'ok',
       database,
-      databaseLatencyMs: Date.now() - startedAt,
+      databaseLatencyMs,
+      redis,
       gemini: process.env.GEMINI_API_KEY ? 'configured' : 'not_configured',
       uptimeSeconds: Math.round(process.uptime()),
       nodeVersion: process.version,
@@ -544,6 +549,9 @@ export const updateAdminSettings = async (req, res, next) => {
       { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
     );
     await writeAuditLog({ actor: req.user._id, action: 'settings.update', targetType: 'PlatformSettings', targetId: settings._id, metadata: req.body, req });
+    // Make the maintenance toggle take effect on the next request instead of
+    // waiting for the cache window to expire.
+    invalidateMaintenanceCache();
     return res.json({ settings });
   } catch (err) {
     next(err);
