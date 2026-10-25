@@ -41,9 +41,7 @@ export default function InsightsPage() {
   const [voiceLang, setVoiceLang] = useState(
     () => localStorage.getItem('ledger:voice-lang') || 'en-IN'
   );
-  const [speakReplies, setSpeakReplies] = useState(
-    () => localStorage.getItem('ledger:speak-replies') === 'true'
-  );
+  const [speaking, setSpeaking] = useState(false);
   const sendRef = useRef(null);
   const heardRef = useRef('');
   const sentByVoiceRef = useRef(false);
@@ -105,32 +103,40 @@ export default function InsightsPage() {
 
     const data = await sendChatMessage({ question: q, file, note });
     const reply = data?.reply || data?.answers;
-    if (reply && (viaVoice || speakReplies)) speak(toPlainText(reply));
+    if (reply && viaVoice) speak(toPlainText(reply));
   }
 
-  // Replies are read aloud when the question was spoken, or when the speaker toggle is on.
-  // Urdu script uses an Urdu voice; Roman Urdu and English read best with an Indian-English one.
+  // A spoken question gets a spoken answer, like a voice assistant. Urdu script uses an
+  // Urdu voice; Roman Urdu and English read best with an Indian-English one.
   function speak(text) {
     if (!('speechSynthesis' in window) || !text) return;
     const utterance = new SpeechSynthesisUtterance(text.slice(0, 600));
     utterance.lang = /[\u0600-\u06ff]/.test(text) ? 'ur-PK' : 'en-IN';
+    utterance.onstart = () => setSpeaking(true);
+    utterance.onend = () => setSpeaking(false);
+    utterance.onerror = () => setSpeaking(false);
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utterance);
   }
 
-  function toggleSpeakReplies() {
-    const next = !speakReplies;
-    setSpeakReplies(next);
-    localStorage.setItem('ledger:speak-replies', String(next));
-    if (!next) window.speechSynthesis?.cancel();
+  function stopSpeaking() {
+    window.speechSynthesis?.cancel();
+    setSpeaking(false);
   }
 
-  function toggleVoiceLang() {
+  // Switches the recognizer to the other language without sending what was heard.
+  function switchVoiceLang() {
     const next = voiceLang === 'en-IN' ? 'ur-PK' : 'en-IN';
     setVoiceLang(next);
     localStorage.setItem('ledger:voice-lang', next);
+    heardRef.current = '';
+    setChatInput('');
+    const previous = recognitionRef.current;
+    recognitionRef.current = null;
+    previous?.abort?.();
+    setListening(false);
+    setTimeout(() => startListening(next), 250);
   }
-
   function startNewChat() {
     resetChat();
     setAttachment(null);
@@ -138,6 +144,7 @@ export default function InsightsPage() {
     setVoiceError('');
     setBillNote('');
     setHistoryOpen(false);
+    stopSpeaking();
   }
 
   async function validateAttachment(file) {
@@ -177,7 +184,7 @@ export default function InsightsPage() {
   // Press the mic, speak, and the message is sent when you stop (or pause), the way
   // a voice assistant works. A tap while listening stops early and still sends what
   // was heard. The transcript streams into the box so you can see it as you speak.
-  function startListening() {
+  function startListening(langOverride) {
     if (!speechSupported) {
       setVoiceError('Voice input is not supported in this browser. Try Chrome or Edge.');
       return;
@@ -195,7 +202,7 @@ export default function InsightsPage() {
     const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognition = new Recognition();
 
-    recognition.lang = voiceLang;
+    recognition.lang = typeof langOverride === 'string' ? langOverride : voiceLang;
     recognition.continuous = false;
     recognition.interimResults = true;
 
@@ -209,6 +216,7 @@ export default function InsightsPage() {
     };
 
     recognition.onerror = (event) => {
+      if (recognitionRef.current !== recognition) return;
       heardRef.current = '';
       setListening(false);
       if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
@@ -223,6 +231,7 @@ export default function InsightsPage() {
     };
 
     recognition.onend = () => {
+      if (recognitionRef.current !== recognition) return;
       setListening(false);
       const heard = heardRef.current;
       heardRef.current = '';
@@ -523,7 +532,22 @@ export default function InsightsPage() {
           {listening && (
             <div className="chat-listening" role="status">
               <span className="chat-listening-dot" aria-hidden="true" />
-              Listening… speak now. It sends when you stop talking.
+              <span>
+                Listening in {voiceLang === 'en-IN' ? 'English' : 'Urdu'}… speak now, it sends when
+                you stop.
+              </span>
+              <button type="button" className="chat-listening-link" onClick={switchVoiceLang}>
+                {voiceLang === 'en-IN' ? 'Switch to اردو' : 'Switch to English'}
+              </button>
+            </div>
+          )}
+          {speaking && !listening && (
+            <div className="chat-listening" role="status">
+              <span className="chat-listening-dot" aria-hidden="true" />
+              <span>Speaking the answer…</span>
+              <button type="button" className="chat-listening-link" onClick={stopSpeaking}>
+                Stop
+              </button>
             </div>
           )}
 
@@ -583,46 +607,8 @@ export default function InsightsPage() {
 
             <button
               type="button"
-              className="chat-voice-lang"
-              onClick={toggleVoiceLang}
-              aria-label={`Voice language: ${voiceLang === 'en-IN' ? 'English' : 'Urdu'}. Tap to switch.`}
-              title="Voice language"
-            >
-              {voiceLang === 'en-IN' ? 'EN' : 'اردو'}
-            </button>
-
-            <button
-              type="button"
-              className={`chat-tool-button${speakReplies ? ' is-on' : ''}`}
-              onClick={toggleSpeakReplies}
-              aria-pressed={speakReplies}
-              aria-label={speakReplies ? 'Stop reading replies aloud' : 'Read replies aloud'}
-              title={speakReplies ? 'Replies are read aloud' : 'Read replies aloud'}
-            >
-              <svg
-                width="19"
-                height="19"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.9"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M11 5 6 9H3v6h3l5 4Z" />
-                {speakReplies ? (
-                  <path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" />
-                ) : (
-                  <path d="m16 9 5 6m0-6-5 6" />
-                )}
-              </svg>
-            </button>
-
-            <button
-              type="button"
               className={`chat-tool-button chat-mic-button${listening ? ' is-listening' : ''}`}
-              onClick={startListening}
+              onClick={() => startListening()}
               disabled={!speechSupported}
               aria-label={listening ? 'Stop voice input' : 'Use voice input'}
               title={
