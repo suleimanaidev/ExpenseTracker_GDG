@@ -2,11 +2,11 @@
 
 export default function HeatMap({ data }) {
   // data = [{ day: 'Sun', total: 0, count: 0 }, ...]
-  const maxVal = Math.max(...data.map(d => d.total), 1);
+  const maxVal = Math.max(...data.map((d) => d.total), 1);
 
   return (
     <div className="heatmap">
-      {data.map(d => {
+      {data.map((d) => {
         const intensity = d.total / maxVal;
         let bg = 'var(--bg-deep)';
         let isLightBg = true;
@@ -25,11 +25,20 @@ export default function HeatMap({ data }) {
           <div
             key={d.day}
             className="heatmap-cell"
-            style={{ backgroundColor: bg, borderColor: intensity > 0 ? 'rgba(0, 161, 155, 0.3)' : 'var(--border)' }}
+            style={{
+              backgroundColor: bg,
+              borderColor: intensity > 0 ? 'rgba(0, 161, 155, 0.3)' : 'var(--border)',
+            }}
           >
-            <div className="heatmap-day" style={{ color: dayColor }}>{d.day}</div>
+            <div className="heatmap-day" style={{ color: dayColor }}>
+              {d.day}
+            </div>
             <div className="heatmap-val num" style={{ color: textColor }}>
-              {d.total > 0 ? (d.total >= 1000 ? Math.round(d.total / 1000) + 'k' : Math.round(d.total)) : '—'}
+              {d.total > 0
+                ? d.total >= 1000
+                  ? Math.round(d.total / 1000) + 'k'
+                  : Math.round(d.total)
+                : '—'}
             </div>
             {d.count > 0 && (
               <div className="heatmap-count" style={{ color: countColor }}>

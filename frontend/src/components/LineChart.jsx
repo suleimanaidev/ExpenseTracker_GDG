@@ -1,22 +1,33 @@
 'use client';
 
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 
-export default function LineChart({ data, currency = 'PKR', height = 200 }) {
+export default function LineChart({ data, currency: _currency = 'PKR', height = 200 }) {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
+  const [width, setWidth] = useState(0);
 
-  const fmt = (n) => {
-    const symbols = { PKR: 'PKR ', USD: '$', EUR: '€', GBP: '£', INR: '₹' };
-    return (symbols[currency] || currency + ' ') + n.toLocaleString('en-IN');
-  };
+  // The canvas has a fixed pixel width, so it used to keep its old size after the
+  // sidebar collapsed or the window was resized until the data changed. Watching
+  // the container makes the chart follow the layout immediately instead.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return undefined;
+
+    const measure = () => setWidth(container.clientWidth);
+    measure();
+
+    if (typeof ResizeObserver === 'undefined') return undefined;
+
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    const container = containerRef.current;
-    if (!canvas || !container || !data || data.length === 0) return;
+    if (!canvas || !width || !data || data.length === 0) return;
 
-    const width = container.clientWidth;
     const dpr = window.devicePixelRatio || 1;
     canvas.width = width * dpr;
     canvas.height = height * dpr;
@@ -26,11 +37,14 @@ export default function LineChart({ data, currency = 'PKR', height = 200 }) {
     const ctx = canvas.getContext('2d');
     ctx.scale(dpr, dpr);
 
-    const padL = 60, padR = 20, padT = 20, padB = 30;
+    const padL = 60,
+      padR = 20,
+      padT = 20,
+      padB = 30;
     const chartW = width - padL - padR;
     const chartH = height - padT - padB;
 
-    const values = data.map(d => d.amount);
+    const values = data.map((d) => d.amount);
     const rawMax = Math.max(...values, 1);
     const maxVal = Math.ceil(rawMax / 100) * 100;
 
@@ -91,7 +105,7 @@ export default function LineChart({ data, currency = 'PKR', height = 200 }) {
 
       ctx.beginPath();
       ctx.moveTo(points[0].x, padT + chartH);
-      points.forEach(p => ctx.lineTo(p.x, p.y));
+      points.forEach((p) => ctx.lineTo(p.x, p.y));
       ctx.lineTo(points[points.length - 1].x, padT + chartH);
       ctx.closePath();
       ctx.fillStyle = gradient;
@@ -123,7 +137,7 @@ export default function LineChart({ data, currency = 'PKR', height = 200 }) {
         }
       });
     }
-  }, [data, height, currency]);
+  }, [data, height, width]);
 
   return (
     <div ref={containerRef} className="line-chart-container">

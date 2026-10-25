@@ -1,17 +1,32 @@
 'use client';
 
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 
 export default function BarChart({ data, categories, currency = 'PKR', height = 220 }) {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
+  const [width, setWidth] = useState(0);
+
+  // Keep the canvas in step with its container, including sidebar collapse and
+  // window resizes, instead of only redrawing when the data changes.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return undefined;
+
+    const measure = () => setWidth(container.clientWidth);
+    measure();
+
+    if (typeof ResizeObserver === 'undefined') return undefined;
+
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    const container = containerRef.current;
-    if (!canvas || !container || !data || data.length === 0) return;
+    if (!canvas || !width || !data || data.length === 0) return;
 
-    const width = container.clientWidth;
     const dpr = window.devicePixelRatio || 1;
     canvas.width = width * dpr;
     canvas.height = height * dpr;
@@ -21,11 +36,14 @@ export default function BarChart({ data, categories, currency = 'PKR', height = 
     const ctx = canvas.getContext('2d');
     ctx.scale(dpr, dpr);
 
-    const padL = 60, padR = 20, padT = 20, padB = 40;
+    const padL = 60,
+      padR = 20,
+      padT = 20,
+      padB = 40;
     const chartW = width - padL - padR;
     const chartH = height - padT - padB;
 
-    const rawMax = Math.max(...data.map(d => d.total), 1);
+    const rawMax = Math.max(...data.map((d) => d.total), 1);
     const maxVal = Math.ceil(rawMax / 100) * 100;
 
     ctx.clearRect(0, 0, width, height);
@@ -99,9 +117,13 @@ export default function BarChart({ data, categories, currency = 'PKR', height = 
       ctx.font = '10px Inter, sans-serif';
       const symbols = { PKR: 'PKR ', USD: '$', EUR: '€', GBP: '£', INR: '₹' };
       const prefix = symbols[currency] || currency + ' ';
-      ctx.fillText(d.total >= 1000 ? prefix + Math.round(d.total / 1000) + 'k' : prefix + d.total, cx, y - 4);
+      ctx.fillText(
+        d.total >= 1000 ? prefix + Math.round(d.total / 1000) + 'k' : prefix + d.total,
+        cx,
+        y - 4
+      );
     });
-  }, [data, height, currency, categories]);
+  }, [data, height, currency, categories, width]);
 
   return (
     <div ref={containerRef} className="bar-chart-container">

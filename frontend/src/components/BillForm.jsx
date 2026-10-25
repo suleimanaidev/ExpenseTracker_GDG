@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 import api from '../lib/api';
+import { todayLocal } from '../lib/dates';
+import BillScanner from './BillScanner';
 
 // Mirrors SUPPORTED_CURRENCIES in backend/utils/billCalculations.js. The server
 // rejects anything outside this list with a 400, so there is no point offering
@@ -17,8 +19,6 @@ const STATUSES = [
 // The server rejects a bill with more than MAX_ITEMS line items; capped here so
 // the form cannot build a payload that is guaranteed to fail validation.
 const MAX_ITEMS = 50;
-
-const today = () => new Date().toISOString().slice(0, 10);
 
 /**
  * Money handling.
@@ -44,7 +44,7 @@ export default function BillForm({ categories, initial, onCancel, onSaved }) {
   const [invoiceNumber, setInvoiceNumber] = useState(initial?.invoiceNumber || '');
   const [currency, setCurrency] = useState(initial?.currency || 'PKR');
   const [category, setCategory] = useState(initial?.category || categories[0]?.name || 'Other');
-  const [issueDate, setIssueDate] = useState(asDate(initial?.issue_date) || today());
+  const [issueDate, setIssueDate] = useState(asDate(initial?.issue_date) || todayLocal());
   const [dueDate, setDueDate] = useState(asDate(initial?.due_date));
   const [total, setTotal] = useState(asInput(initial?.total));
   const [status, setStatus] = useState(initial?.status || 'unpaid');
@@ -63,85 +63,48 @@ export default function BillForm({ categories, initial, onCancel, onSaved }) {
   const [error, setError] = useState('');
   // Non-null while the server is holding a rejected save for the user to rule on.
   const [duplicate, setDuplicate] = useState(null);
-  const [scanning, setScanning] = useState(false);
-  const [scanError, setScanError] = useState('');
-  const [scanWarnings, setScanWarnings] = useState([]);
+  // True while the scanner is reading the document, so a save cannot race the
+  // autofill and be overwritten by it a moment later.
+  const [scanBusy, setScanBusy] = useState(false);
 
   /**
-   * Asks the backend to read the attached document with Gemini.
+   * Applies a scan result to the form.
    *
-   * `/scan` is strictly read-only — it never writes — so nothing here is saved
-   * until the user submits the form. The document stays in browser memory and is
-   * re-uploaded as the attachment on save, so the file is sent once for parsing
-   * and once for storage.
+   * `/scan` is strictly read-only — it never writes — so nothing is saved until
+   * the user submits. The document stays in browser memory and is re-uploaded as
+   * the attachment on save, so the file is sent once for parsing and once for
+   * storage. Only a field the scan actually has something for is overwritten, so
+   * a partial read does not wipe what the user already typed.
    */
-  async function handleScan() {
-    if (!file) return;
+  function applyScan(parsed) {
+    if (parsed.vendor) setVendor(parsed.vendor);
+    if (parsed.invoiceNumber) setInvoiceNumber(parsed.invoiceNumber);
+    if (parsed.issueDate) setIssueDate(parsed.issueDate);
+    if (parsed.dueDate) setDueDate(parsed.dueDate);
+    if (parsed.currency) setCurrency(parsed.currency);
+    if (parsed.total) setTotal(parsed.total);
+    if (parsed.suggestedCategory) setCategory(parsed.suggestedCategory);
 
-    setScanning(true);
-    setScanError('');
-    setScanWarnings([]);
-
-    try {
-      const form = new FormData();
-      form.append('bill', file);
-
-      const data = await api.post('/api/bills/scan', form);
-      const parsed = data?.bill;
-      if (!parsed) throw new Error('The scanner returned an empty result.');
-
-      // Only overwrite a field the scan actually has something for, so a partial
-      // read does not wipe what the user already typed.
-      if (parsed.vendor) setVendor(parsed.vendor);
-      if (parsed.invoiceNumber) setInvoiceNumber(parsed.invoiceNumber);
-      if (parsed.issueDate) setIssueDate(parsed.issueDate);
-      if (parsed.dueDate) setDueDate(parsed.dueDate);
-      if (parsed.currency) setCurrency(parsed.currency);
-      if (parsed.total) setTotal(parsed.total);
-      if (parsed.suggestedCategory) setCategory(parsed.suggestedCategory);
-
-      if (parsed.items?.length) {
-        setItems(parsed.items.map((item) => ({
+    if (parsed.items?.length) {
+      setItems(
+        parsed.items.map((item) => ({
           description: item.description || '',
           quantity: String(item.quantity ?? 1),
           unitPrice: asInput(item.unitPrice),
-        })));
-      }
-
-      // Warnings are the model's own doubts — a low confidence score, an
-      // arithmetic mismatch, a category that did not match. Surfaced rather than
-      // hidden so the user checks the numbers before paying them.
-      setScanWarnings(parsed.warnings || []);
-    } catch (err) {
-      // The server always sets canEnterManually on a scan failure, so this is a
-      // dead end only for the user, never a blocked form.
-      setScanError(err.message || 'Could not read this document. Enter the bill manually.');
-    } finally {
-      setScanning(false);
+        }))
+      );
     }
   }
 
-  function chooseFile(next) {
-    setFile(next);
-    setScanError('');
-    setScanWarnings([]);
-  }
-
   function updateLine(index, patch) {
-    setItems(prev => prev.map((line, i) => (i === index ? { ...line, ...patch } : line)));
+    setItems((prev) => prev.map((line, i) => (i === index ? { ...line, ...patch } : line)));
   }
 
   function removeLine(index) {
-    setItems(prev => prev.filter((_, i) => i !== index));
+    setItems((prev) => prev.filter((_, i) => i !== index));
   }
 
-  /**
-   * @param saveAnyway Set only on the retry the user explicitly approves after
-   *   seeing the duplicate. It overrides the server's soft check but *not* the
-   *   unique (user, vendor, invoiceNumber) index, so a 409 with no matching
-   *   bill behind it must not offer the button at all.
-   */
-  async function submit(saveAnyway = false) {
+  async function submit() {
     const amount = parseFloat(total);
     if (!Number.isFinite(amount) || amount <= 0) {
       setError('Enter a total greater than zero.');
@@ -156,12 +119,14 @@ export default function BillForm({ categories, initial, onCancel, onSaved }) {
     setError('');
 
     const cleanedItems = items
-      .filter(line => line.description.trim())
-      .map(line => ({
+      .filter((line) => line.description.trim())
+      .map((line) => ({
         description: line.description.trim(),
         quantity: parseFloat(line.quantity) || 1,
         unitPrice: parseFloat(line.unitPrice) || 0,
-        lineTotal: Math.round((parseFloat(line.quantity) || 1) * (parseFloat(line.unitPrice) || 0) * 100) / 100,
+        lineTotal:
+          Math.round((parseFloat(line.quantity) || 1) * (parseFloat(line.unitPrice) || 0) * 100) /
+          100,
       }));
 
     const payload = {
@@ -178,8 +143,6 @@ export default function BillForm({ categories, initial, onCancel, onSaved }) {
       total: amount,
       items: cleanedItems,
     };
-
-    if (saveAnyway) payload.saveAnyway = true;
 
     try {
       let result;
@@ -205,7 +168,6 @@ export default function BillForm({ categories, initial, onCancel, onSaved }) {
         form.append('invoiceNumber', payload.invoiceNumber || '');
         form.append('notes', payload.notes);
         form.append('items', JSON.stringify(cleanedItems));
-        if (payload.saveAnyway) form.append('saveAnyway', 'true');
         form.append('bill', file);
 
         result = await api.post('/api/bills', form);
@@ -218,13 +180,10 @@ export default function BillForm({ categories, initial, onCancel, onSaved }) {
       const data = err?.data;
 
       if (err?.status === 409 && data?.code === 'DUPLICATE_BILL') {
-        // Hold the save open and show what collided. `duplicate` is null when the
-        // collision came from the unique index rather than the soft check, and
-        // saveAnyway cannot rescue that one — the invoice number has to change.
+        // Show the matching record; duplicate saves have no override path.
         setDuplicate({
           message: data.error,
           existing: data.duplicate,
-          canOverride: Boolean(data.duplicate),
         });
       } else {
         setError(data?.details?.[0] || err.message || 'Could not save this bill.');
@@ -251,10 +210,12 @@ export default function BillForm({ categories, initial, onCancel, onSaved }) {
       {duplicate && (
         <div className="bill-duplicate">
           <div className="bill-duplicate-title">
-            {duplicate.existing?.vendor || vendor} · {duplicate.existing?.invoiceNumber || 'no invoice number'}
+            {duplicate.existing?.vendor || vendor} ·{' '}
+            {duplicate.existing?.invoiceNumber || 'no invoice number'}
           </div>
           <div className="bill-duplicate-meta">
-            {duplicate.existing?.total !== undefined && duplicate.existing?.total !== null &&
+            {duplicate.existing?.total !== undefined &&
+              duplicate.existing?.total !== null &&
               `${duplicate.existing.total} ${duplicate.existing.currency || ''}`.trim()}
             {duplicate.existing?.issue_date ? ` · ${duplicate.existing.issue_date}` : ''}
           </div>
@@ -263,65 +224,31 @@ export default function BillForm({ categories, initial, onCancel, onSaved }) {
             <button type="button" className="btn btn--ghost" onClick={() => setDuplicate(null)}>
               Go back
             </button>
-            {duplicate.canOverride && (
-              <button type="button" className="btn btn--danger" disabled={saving} onClick={() => submit(true)}>
-                {saving ? 'Saving...' : 'Save anyway'}
-              </button>
-            )}
           </div>
-          {!duplicate.canOverride && (
-            <p className="bill-duplicate-text" style={{ marginTop: '0.75rem' }}>
-              This exact vendor and invoice number is already taken, so the invoice number has to change.
-            </p>
-          )}
+          <p className="bill-duplicate-text" style={{ marginTop: '0.75rem' }}>
+            This bill was not saved again. Change the invoice details only if this is genuinely a
+            different bill.
+          </p>
         </div>
       )}
 
       {!duplicate && (
         <>
-          {/* One document field serves both purposes: it is parsed by the scanner
-              here, and uploaded as the attachment on save. */}
-          <div className="form-group">
-            <label className="form-label">Invoice Document</label>
-            <input
-              type="file"
-              onChange={e => chooseFile(e.target.files?.[0] || null)}
-              className="form-input"
-              accept="image/*,application/pdf"
-            />
-            <p className="form-hint">PDF or image, up to 8 MB. Optional.</p>
-
-            {file && (
-              <button
-                type="button"
-                className="btn btn--ghost btn--sm mt-4"
-                onClick={handleScan}
-                disabled={scanning}
-              >
-                {scanning ? 'Reading document...' : 'Scan with AI to fill this form'}
-              </button>
-            )}
-
-            {scanError && (
-              <div className="alert alert--error mt-4">{scanError}</div>
-            )}
-
-            {scanWarnings.length > 0 && (
-              <div className="bill-scan-warnings mt-4">
-                <strong>Please check these before saving:</strong>
-                <ul>
-                  {scanWarnings.map((w, i) => <li key={i}>{w}</li>)}
-                </ul>
-              </div>
-            )}
-          </div>
+          {/* One document serves both purposes: it is parsed by the scanner here,
+              and uploaded as the attachment on save. */}
+          <BillScanner
+            file={file}
+            onFileChange={setFile}
+            onScanned={applyScan}
+            onBusyChange={setScanBusy}
+          />
 
           <div className="form-group">
             <label className="form-label">Vendor</label>
             <input
               type="text"
               value={vendor}
-              onChange={e => setVendor(e.target.value)}
+              onChange={(e) => setVendor(e.target.value)}
               placeholder="e.g. K-Electric"
               className="form-input"
               autoFocus
@@ -335,16 +262,22 @@ export default function BillForm({ categories, initial, onCancel, onSaved }) {
               <input
                 type="text"
                 value={invoiceNumber}
-                onChange={e => setInvoiceNumber(e.target.value)}
+                onChange={(e) => setInvoiceNumber(e.target.value)}
                 placeholder="Optional"
                 className="form-input"
               />
             </div>
             <div className="form-group">
               <label className="form-label">Currency</label>
-              <select value={currency} onChange={e => setCurrency(e.target.value)} className="form-select">
-                {CURRENCIES.map(c => (
-                  <option key={c} value={c}>{c}</option>
+              <select
+                value={currency}
+                onChange={(e) => setCurrency(e.target.value)}
+                className="form-select"
+              >
+                {CURRENCIES.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
                 ))}
               </select>
             </div>
@@ -356,7 +289,7 @@ export default function BillForm({ categories, initial, onCancel, onSaved }) {
               <input
                 type="date"
                 value={issueDate}
-                onChange={e => setIssueDate(e.target.value)}
+                onChange={(e) => setIssueDate(e.target.value)}
                 className="form-input"
               />
             </div>
@@ -365,7 +298,7 @@ export default function BillForm({ categories, initial, onCancel, onSaved }) {
               <input
                 type="date"
                 value={dueDate}
-                onChange={e => setDueDate(e.target.value)}
+                onChange={(e) => setDueDate(e.target.value)}
                 className="form-input"
               />
             </div>
@@ -377,7 +310,7 @@ export default function BillForm({ categories, initial, onCancel, onSaved }) {
               <input
                 type="number"
                 value={total}
-                onChange={e => setTotal(e.target.value)}
+                onChange={(e) => setTotal(e.target.value)}
                 placeholder="0"
                 className="form-input num"
                 step="any"
@@ -387,9 +320,15 @@ export default function BillForm({ categories, initial, onCancel, onSaved }) {
             </div>
             <div className="form-group">
               <label className="form-label">Status</label>
-              <select value={status} onChange={e => setStatus(e.target.value)} className="form-select">
-                {STATUSES.map(s => (
-                  <option key={s.value} value={s.value}>{s.label}</option>
+              <select
+                value={status}
+                onChange={(e) => setStatus(e.target.value)}
+                className="form-select"
+              >
+                {STATUSES.map((s) => (
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
                 ))}
               </select>
             </div>
@@ -397,9 +336,15 @@ export default function BillForm({ categories, initial, onCancel, onSaved }) {
 
           <div className="form-group">
             <label className="form-label">Category</label>
-            <select value={category} onChange={e => setCategory(e.target.value)} className="form-select">
-              {categories.map(c => (
-                <option key={c.name} value={c.name}>{c.icon} {c.name}</option>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="form-select"
+            >
+              {categories.map((c) => (
+                <option key={c.name} value={c.name}>
+                  {c.icon} {c.name}
+                </option>
               ))}
             </select>
           </div>
@@ -410,7 +355,9 @@ export default function BillForm({ categories, initial, onCancel, onSaved }) {
             <div className="form-label-row">
               <label className="form-label">Line Items</label>
               {items.length > 0 && (
-                <span className="form-hint">{items.length} of {MAX_ITEMS}</span>
+                <span className="form-hint">
+                  {items.length} of {MAX_ITEMS}
+                </span>
               )}
             </div>
 
@@ -419,14 +366,14 @@ export default function BillForm({ categories, initial, onCancel, onSaved }) {
                 <input
                   type="text"
                   value={line.description}
-                  onChange={e => updateLine(index, { description: e.target.value })}
+                  onChange={(e) => updateLine(index, { description: e.target.value })}
                   placeholder="Description"
                   className="form-input"
                 />
                 <input
                   type="number"
                   value={line.quantity}
-                  onChange={e => updateLine(index, { quantity: e.target.value })}
+                  onChange={(e) => updateLine(index, { quantity: e.target.value })}
                   placeholder="Qty"
                   className="form-input num"
                   step="any"
@@ -436,7 +383,7 @@ export default function BillForm({ categories, initial, onCancel, onSaved }) {
                 <input
                   type="number"
                   value={line.unitPrice}
-                  onChange={e => updateLine(index, { unitPrice: e.target.value })}
+                  onChange={(e) => updateLine(index, { unitPrice: e.target.value })}
                   placeholder="Unit price"
                   className="form-input num"
                   step="any"
@@ -450,15 +397,28 @@ export default function BillForm({ categories, initial, onCancel, onSaved }) {
                   onClick={() => removeLine(index)}
                   aria-label="Remove line"
                 >
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                  <svg
+                    width="15"
+                    height="15"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  >
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
                   </svg>
                 </button>
               </div>
             ))}
 
             {items.length < MAX_ITEMS && (
-              <button type="button" className="btn btn--ghost btn--sm mt-4" onClick={() => setItems(prev => [...prev, emptyLine()])}>
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm mt-4"
+                onClick={() => setItems((prev) => [...prev, emptyLine()])}
+              >
                 Add line
               </button>
             )}
@@ -469,7 +429,7 @@ export default function BillForm({ categories, initial, onCancel, onSaved }) {
             <input
               type="text"
               value={notes}
-              onChange={e => setNotes(e.target.value)}
+              onChange={(e) => setNotes(e.target.value)}
               placeholder="Optional"
               className="form-input"
             />
@@ -482,8 +442,14 @@ export default function BillForm({ categories, initial, onCancel, onSaved }) {
             <button type="button" className="btn btn--ghost" onClick={onCancel} disabled={saving}>
               Cancel
             </button>
-            <button type="submit" className="btn btn--gold" disabled={saving}>
-              {saving ? 'Saving...' : isEdit ? 'Update Bill' : 'Add Bill'}
+            <button type="submit" className="btn btn--gold" disabled={saving || scanBusy}>
+              {saving
+                ? 'Saving...'
+                : scanBusy
+                  ? 'Reading document…'
+                  : isEdit
+                    ? 'Update Bill'
+                    : 'Add Bill'}
             </button>
           </div>
         </>

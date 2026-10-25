@@ -1,14 +1,24 @@
 'use client';
 
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
+import { formatCurrency } from '../lib/categories';
+
+const readTheme = () =>
+  typeof document === 'undefined' ? 'light' : document.documentElement.getAttribute('data-theme');
 
 export default function DonutChart({ data, currency = 'PKR', size = 200 }) {
   const canvasRef = useRef(null);
+  const [theme, setTheme] = useState(readTheme);
 
-  const fmt = (n) => {
-    const symbols = { PKR: 'PKR ', USD: '$', EUR: '€', GBP: '£', INR: '₹' };
-    return (symbols[currency] || currency + ' ') + n.toLocaleString('en-IN');
-  };
+  // Redraw when the theme is toggled, otherwise the centre label keeps the old colour.
+  useEffect(() => {
+    const observer = new MutationObserver(() => setTheme(readTheme()));
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+    });
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -19,8 +29,10 @@ export default function DonutChart({ data, currency = 'PKR', size = 200 }) {
     canvas.height = size * dpr;
     ctx.scale(dpr, dpr);
 
-    const cx = size / 2, cy = size / 2;
-    const outerR = size * 0.44, innerR = size * 0.27;
+    const cx = size / 2,
+      cy = size / 2;
+    const outerR = size * 0.44,
+      innerR = size * 0.27;
     const gap = 0.03;
     const total = data.reduce((s, d) => s + d.value, 0);
 
@@ -39,16 +51,18 @@ export default function DonutChart({ data, currency = 'PKR', size = 200 }) {
       startAngle = endAngle + gap;
     });
 
-    // Center
-    ctx.fillStyle = '#8A9099';
+    // Center. Canvas text cannot use CSS variables directly, so the theme colours
+    // are read at draw time; a hard-coded dark label vanished on the dark theme.
+    const styles = getComputedStyle(document.documentElement);
+    ctx.fillStyle = styles.getPropertyValue('--text-muted').trim() || '#8A9099';
     ctx.font = `${size * 0.05}px Inter, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('Total', cx, cy - size * 0.04);
-    ctx.fillStyle = '#1C1D21';
+    ctx.fillStyle = styles.getPropertyValue('--text-primary').trim() || '#1C1D21';
     ctx.font = `600 ${size * 0.065}px Fraunces, serif`;
-    ctx.fillText(fmt(total), cx, cy + size * 0.05);
-  }, [data, size, currency]);
+    ctx.fillText(formatCurrency(total, currency), cx, cy + size * 0.05);
+  }, [data, size, currency, theme]);
 
   return (
     <div className="donut-chart-wrap">
@@ -57,13 +71,13 @@ export default function DonutChart({ data, currency = 'PKR', size = 200 }) {
       </div>
       {data && data.length > 0 && (
         <div className="donut-legend">
-          {data.map(d => (
+          {data.map((d) => (
             <div key={d.name} className="legend-row">
               <div className="legend-left">
                 <span className="legend-dot" style={{ backgroundColor: d.color }} />
                 <span className="legend-name">{d.name}</span>
               </div>
-              <span className="legend-value num">{fmt(d.value)}</span>
+              <span className="legend-value num">{formatCurrency(d.value, currency)}</span>
             </div>
           ))}
         </div>

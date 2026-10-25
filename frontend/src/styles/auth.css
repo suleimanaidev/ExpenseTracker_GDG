@@ -1,0 +1,267 @@
+/* Sign in / create account: a brand panel beside the form on desktop, the form
+   alone on phones. Uses the shared tokens, so the dark theme follows. */
+
+.auth-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  min-height: 100vh;
+  background: var(--bg-primary, var(--bg));
+}
+
+/* ─── Brand panel ─── */
+.auth-aside {
+  position: relative;
+  display: flex;
+  overflow: hidden;
+  padding: clamp(32px, 5vw, 64px);
+  color: #fff;
+  background:
+    radial-gradient(520px 320px at 90% 0%, rgba(255, 255, 255, 0.16), transparent 70%),
+    radial-gradient(480px 360px at 0% 100%, rgba(0, 0, 0, 0.22), transparent 70%),
+    linear-gradient(145deg, #00a19b, #006f6b);
+}
+
+.auth-aside-inner {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 48px;
+  width: 100%;
+  max-width: 480px;
+  margin-left: auto;
+}
+
+.auth-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  width: fit-content;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  color: #fff;
+  text-decoration: none;
+}
+
+.auth-mark {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  font-family: var(--font-display, serif);
+  font-size: 1.15rem;
+  border: 1.5px solid rgba(255, 255, 255, 0.7);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.auth-pitch h2 {
+  margin: 0;
+  font-size: clamp(2rem, 3.4vw, 2.9rem);
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+  color: #fff;
+}
+
+.auth-pitch p {
+  max-width: 420px;
+  margin: 16px 0 0;
+  font-size: 1.02rem;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.auth-points {
+  display: grid;
+  gap: 14px;
+  margin: 32px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.auth-points li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.97rem;
+  font-weight: 500;
+}
+
+.auth-tick {
+  display: grid;
+  flex: 0 0 24px;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.auth-tick svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: #fff;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.auth-aside-note {
+  margin: 0;
+  padding-top: 20px;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.7);
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+/* ─── Form side ─── */
+.auth-main {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(24px, 4vw, 56px);
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 420px;
+  animation: authRise 0.55s var(--ease-out-soft, ease) backwards;
+}
+
+@keyframes authRise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+}
+
+.auth-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 28px;
+  padding: 6px 10px 6px 4px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition:
+    color 0.2s ease,
+    transform 0.2s var(--ease-out-soft, ease);
+}
+
+.auth-back:hover {
+  color: var(--text-primary);
+  transform: translateX(-2px);
+}
+
+.auth-back:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+.auth-heading h1 {
+  margin: 0;
+  font-size: 1.9rem;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+
+.auth-heading p {
+  margin: 8px 0 24px;
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+}
+
+.auth-card .auth-form {
+  display: grid;
+  gap: 16px;
+}
+
+.auth-card .form-group {
+  margin: 0;
+}
+
+.auth-card .form-input {
+  height: 46px;
+}
+
+.auth-field-error {
+  margin: 6px 0 0;
+  font-size: 0.78rem;
+  color: var(--red-light, var(--red));
+}
+
+.auth-card .form-input[aria-invalid='true'] {
+  border-color: var(--red-light, var(--red));
+}
+
+.auth-submit {
+  height: 46px;
+  margin-top: 4px;
+  font-size: 0.95rem;
+}
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint, var(--text-muted));
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.auth-hint {
+  margin: -4px 0 0;
+  font-size: 0.78rem;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+/* ─── Small screens: the brand panel becomes a slim header ─── */
+@media (max-width: 900px) {
+  .auth-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+
+  .auth-aside {
+    padding: 22px 24px;
+  }
+
+  .auth-aside-inner {
+    gap: 0;
+    margin: 0;
+  }
+
+  .auth-pitch,
+  .auth-aside-note {
+    display: none;
+  }
+
+  .auth-main {
+    align-items: flex-start;
+    padding-top: 28px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-card {
+    animation: none;
+  }
+}

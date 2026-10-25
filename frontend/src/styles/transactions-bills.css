@@ -1,0 +1,110 @@
+.tb-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.tb-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.tb-stats {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 1rem;
+}
+
+.tb-tabs {
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 3px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.tb-tabs::before {
+  content: '';
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc(50% - 3px);
+  background: var(--gold);
+  opacity: 0.16;
+  border-radius: var(--radius-sm);
+  transform: translateX(0);
+  transition: transform 200ms var(--ease-out-soft, ease);
+}
+
+.tb-tabs[data-active='bills']::before {
+  transform: translateX(100%);
+}
+
+.tb-tab {
+  position: relative;
+  padding: 0.5rem 1.25rem;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 150ms var(--ease-out-soft, ease);
+}
+
+.tb-tab:hover,
+.tb-tab--active {
+  color: var(--gold);
+}
+
+.tb-tab:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 1px;
+}
+
+@media (max-width: 480px) {
+  .tb-tabs {
+    display: grid;
+    width: 100%;
+  }
+
+  .tb-actions {
+    width: 100%;
+  }
+
+  .tb-actions .btn {
+    flex: 1 1 0;
+    justify-content: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tb-tabs::before,
+  .tb-tab {
+    transition: none;
+  }
+}
+
+/* Add Bill is a first-class action next to Add Expense, so it gets a teal outline
+   instead of the muted ghost style, which read as a disabled button. */
+.btn.tx-add-bill {
+  color: var(--gold);
+  background: var(--gold-dim);
+  border: 1px solid color-mix(in srgb, var(--gold) 45%, var(--border));
+}
+
+.btn.tx-add-bill:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--gold) 16%, transparent);
+  border-color: var(--gold);
+}
