@@ -12,6 +12,7 @@ import {
   compatInsight,
   configuredProviders,
 } from './aiProviders.js';
+import { AiCapError, BACKUP_CAP_MESSAGE, reserveClaudeCall } from './aiQuota.js';
 
 const GEMINI_MODEL = 'gemini-3.5-flash-lite';
 const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
@@ -278,14 +279,22 @@ const withProviders = (label, implementations) => async (...args) => {
   if (chain.length === 0) return implementations.gemini(...args);
 
   let lastError;
+  let capped = false;
   for (const name of chain) {
     try {
+      // Claude is the paid backup: once today's cap is spent it is skipped, and the
+      // remaining providers still get their turn.
+      if (name === 'claude' && !(await reserveClaudeCall())) {
+        capped = true;
+        continue;
+      }
       return await implementations[name](...args);
     } catch (err) {
       lastError = err;
       console.warn(`[ai] ${name} failed for ${label} (${err.message})${chain.at(-1) === name ? '' : ', trying the next provider'}`);
     }
   }
+  if (capped) throw new AiCapError('AI_BACKUP_CAP_REACHED', BACKUP_CAP_MESSAGE);
   throw lastError;
 };
 

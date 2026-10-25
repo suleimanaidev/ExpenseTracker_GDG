@@ -6,6 +6,7 @@ import {
 } from '../schemas/billSchema.js';
 import { claudeScanBill } from './claudeService.js';
 import { canReadMime, compatScanBill, configuredProviders } from './aiProviders.js';
+import { BACKUP_CAP_MESSAGE, reserveClaudeCall } from './aiQuota.js';
 
 /**
  * AI Bill Scanner — uploads a bill to Google Gemini (multimodal) and returns
@@ -105,6 +106,7 @@ const stripCodeFence = (text) => {
 export const scanFailureStatus = (code) => {
   if (code === 'AI_NOT_CONFIGURED') return 503;
   if (code === 'AI_QUOTA') return 503;
+  if (code === 'AI_BACKUP_CAP_REACHED') return 429;
   if (code === NOT_A_BILL || code === NOTHING_READABLE) return 422;
   return 502;
 };
@@ -330,8 +332,19 @@ export const scanBillWithGemini = async (params) => {
   if (chain.length === 0) return scanWithGemini(params);
 
   let firstFailure = null;
+  let capFailure = null;
   for (const name of chain) {
     if (name !== 'gemini' && !canReadMime(name, params.mimeType)) continue;
+
+    if (name === 'claude' && !(await reserveClaudeCall())) {
+      capFailure = {
+        ok: false,
+        code: 'AI_BACKUP_CAP_REACHED',
+        error: BACKUP_CAP_MESSAGE,
+        retryable: false,
+      };
+      continue;
+    }
 
     if (name !== 'gemini') console.warn(`[billScan] trying ${name}`);
     const result =
@@ -342,6 +355,7 @@ export const scanBillWithGemini = async (params) => {
   }
 
   return (
+    capFailure ||
     firstFailure || {
       ok: false,
       code: 'AI_ERROR',

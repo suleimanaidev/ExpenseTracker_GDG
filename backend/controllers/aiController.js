@@ -456,6 +456,9 @@ export const chatInsight = async (req, res, next) => {
     try {
       result = await generateAIChatProposal(generationArgs);
     } catch (aiErr) {
+      if (aiErr.publicCode) {
+        return res.status(aiErr.statusCode || 429).json({ error: aiErr.message, code: aiErr.publicCode });
+      }
       console.error('Ledger AI chat upstream failure:', aiErr.message);
       await recordAiUsage({
         user: req.user._id,

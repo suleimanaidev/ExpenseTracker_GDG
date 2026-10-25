@@ -17,6 +17,8 @@ export const errorHandler = (err, req, res, next) => {
 
   res.status(statusCode).json({
     error: message,
+    // Set by errors meant for the client, such as an AI spending cap.
+    ...(err.publicCode ? { code: err.publicCode } : {}),
     ...(isProduction ? {} : { stack: err.stack }),
   });
 };
