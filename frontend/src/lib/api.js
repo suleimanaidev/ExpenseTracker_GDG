@@ -3,39 +3,40 @@
  * Handles automatic JWT attachment, silent refresh on 401, credentials inclusion, and standardized errors.
  */
 
-const isLocal = typeof window !== 'undefined' &&
+import { rateLimitMessage } from './rateLimit';
+
+const isLocal =
+  typeof window !== 'undefined' &&
   (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
-export const API_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL)
-  ? import.meta.env.VITE_API_URL
-  : (isLocal ? `${window.location.protocol}//${window.location.hostname}:5000` : (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5000'));
+export const API_URL =
+  typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL
+    ? import.meta.env.VITE_API_URL
+    : isLocal
+      ? `${window.location.protocol}//${window.location.hostname}:5000`
+      : typeof window !== 'undefined'
+        ? window.location.origin
+        : 'http://localhost:5000';
 
 let inMemoryToken = null;
 
+// Older builds mirrored the token into localStorage. Remove any value left
+// behind so a stale bearer token does not linger after this upgrade.
+if (typeof window !== 'undefined') {
+  window.localStorage.removeItem('ledger:access_token');
+}
+
+// The access token deliberately lives only in memory. Persisting it in
+// localStorage would let any XSS read a valid bearer token; page reloads are
+// already handled by the httpOnly refresh cookie and the silent-refresh flow.
 export const setAccessToken = (token) => {
-  inMemoryToken = token;
-  if (typeof window !== 'undefined') {
-    if (token) {
-      localStorage.setItem('ledger:access_token', token);
-    } else {
-      localStorage.removeItem('ledger:access_token');
-    }
-  }
+  inMemoryToken = token || null;
 };
 
-export const getAccessToken = () => {
-  if (inMemoryToken) return inMemoryToken;
-  if (typeof window !== 'undefined') {
-    inMemoryToken = localStorage.getItem('ledger:access_token');
-  }
-  return inMemoryToken;
-};
+export const getAccessToken = () => inMemoryToken;
 
 export const clearAccessToken = () => {
   inMemoryToken = null;
-  if (typeof window !== 'undefined') {
-    localStorage.removeItem('ledger:access_token');
-  }
 };
 
 let refreshPromise = null;
@@ -61,7 +62,7 @@ const silentRefreshToken = async () => {
           return data.accessToken;
         }
         return null;
-      } catch (err) {
+      } catch {
         clearAccessToken();
         return null;
       } finally {
@@ -111,7 +112,12 @@ export async function apiRequest(endpoint, options = {}, isRetry = false) {
   }
 
   // Handle 401 with silent token refresh
-  if (response.status === 401 && !isRetry && !endpoint.includes('/api/auth/login') && !endpoint.includes('/api/auth/refresh')) {
+  if (
+    response.status === 401 &&
+    !isRetry &&
+    !endpoint.includes('/api/auth/login') &&
+    !endpoint.includes('/api/auth/refresh')
+  ) {
     const newToken = await silentRefreshToken();
     if (newToken) {
       // Retry original request with newly refreshed token
@@ -130,10 +136,26 @@ export async function apiRequest(endpoint, options = {}, isRetry = false) {
   }
 
   if (!response.ok) {
+    if (
+      response.status === 503 &&
+      data?.code === 'MAINTENANCE_MODE' &&
+      typeof window !== 'undefined'
+    ) {
+      window.dispatchEvent(new CustomEvent('ledger:maintenance'));
+    }
+
     const errorMsg = data?.error || response.statusText || 'Request failed';
     const err = new Error(errorMsg);
     err.status = response.status;
     err.data = data;
+    err.code = data?.code;
+
+    // A rate limit or a locked account: say how long to wait, in plain words.
+    if (response.status === 429 && data?.code === 'RATE_LIMITED') {
+      err.retryAfterSeconds =
+        Number(data.retryAfterSeconds) || Number(response.headers.get('retry-after')) || 0;
+      err.message = rateLimitMessage(err.retryAfterSeconds);
+    }
     throw err;
   }
 

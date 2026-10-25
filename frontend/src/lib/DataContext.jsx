@@ -103,6 +103,7 @@ export function DataProvider({ children }) {
   const [insight, setInsight] = useState('');
   const [insightSignature, setInsightSignature] = useState(null);
   const [chatLoading, setChatLoading] = useState(false);
+  const [chatBlockedUntil, setChatBlockedUntil] = useState(0);
   const [insightLoading, setInsightLoading] = useState(false);
   const [insightError, setInsightError] = useState('');
   const [apiWarning, setApiWarning] = useState(null);
@@ -787,6 +788,20 @@ export function DataProvider({ children }) {
         // is far more useful than a generic retry message.
         const refusedFile =
           err.status === 422 && ['NOT_A_BILL', 'NOTHING_READABLE'].includes(err.data?.code);
+        const limitCodes = [
+          'RATE_LIMITED',
+          'AI_DAILY_LIMIT_REACHED',
+          'AI_GLOBAL_CAP_REACHED',
+          'AI_BACKUP_CAP_REACHED',
+        ];
+        // The server's own wording for limits is already plain (and states the wait).
+        if (err.status === 429 && limitCodes.includes(err.code)) {
+          const wait = err.retryAfterSeconds || 20;
+          if (err.code === 'RATE_LIMITED')
+            setChatBlockedUntil(Date.now() + Math.min(wait, 30) * 1000);
+          setMessages((prev) => [...prev, { role: 'ai', text: err.message }]);
+          return null;
+        }
         const text =
           err.status === 429
             ? 'I need a short breather — too many requests just now. Ask me again in a minute.'
@@ -850,6 +865,7 @@ export function DataProvider({ children }) {
     messages,
     setMessages,
     chatLoading,
+    chatBlockedUntil,
     sendChatMessage,
     resetChat,
     conversations,

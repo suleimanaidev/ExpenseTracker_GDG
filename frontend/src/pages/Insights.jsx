@@ -8,6 +8,7 @@ import { formatCurrency } from '../lib/categories';
 import PageSkeleton from '../components/PageSkeleton';
 import ChatSidebar from '../components/ChatSidebar';
 import ExpenseProposalCard from '../components/ExpenseProposalCard';
+import { useCountdown } from '../lib/useCountdown';
 import '../styles/chat-page.css';
 
 export default function InsightsPage() {
@@ -17,6 +18,7 @@ export default function InsightsPage() {
     messages,
     setMessages,
     chatLoading,
+    chatBlockedUntil,
     sendChatMessage,
     resetChat,
     conversations,
@@ -42,6 +44,7 @@ export default function InsightsPage() {
     () => localStorage.getItem('ledger:voice-lang') || 'en-IN'
   );
   const [speaking, setSpeaking] = useState(false);
+  const blockedFor = useCountdown(chatBlockedUntil);
   const sendRef = useRef(null);
   const heardRef = useRef('');
   const sentByVoiceRef = useRef(false);
@@ -84,7 +87,7 @@ export default function InsightsPage() {
   async function sendChat(e, overrideQuestion = null) {
     e?.preventDefault();
     const q = (overrideQuestion ?? chatInput).trim();
-    if ((!q && !attachment) || chatLoading) return;
+    if ((!q && !attachment) || chatLoading || blockedFor > 0) return;
 
     // Hand the work (and the in-flight request) to the shared data layer so
     // leaving the page cannot cancel the answer or clear the conversation.
@@ -637,9 +640,15 @@ export default function InsightsPage() {
             <button
               type="submit"
               className="chat-send-button"
-              disabled={chatLoading || (!chatInput.trim() && !attachment)}
+              disabled={chatLoading || blockedFor > 0 || (!chatInput.trim() && !attachment)}
               aria-label={chatLoading ? 'Sending question' : 'Send question'}
-              title={chatLoading ? 'Sending question' : 'Send question'}
+              title={
+                blockedFor > 0
+                  ? `Too many requests, try again in ${blockedFor}s`
+                  : chatLoading
+                    ? 'Sending question'
+                    : 'Send question'
+              }
             >
               {chatLoading ? (
                 <span className="chat-send-spinner" aria-hidden="true" />

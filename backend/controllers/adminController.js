@@ -14,11 +14,12 @@ import { getPlatformStats } from '../services/statsService.js';
 import { writeAuditLog } from '../services/auditService.js';
 import { deleteBillFile } from '../services/billStorageService.js';
 import { generateAIChatResponse } from '../services/aiService.js';
+import { remember } from '../utils/cache.js';
 import { isRedisReady, pingRedis } from '../config/redis.js';
 import { configuredProviders, providerOrder } from '../services/aiProviders.js';
 import { getAiQuotaSnapshot } from '../services/aiQuota.js';
 
-const statsCache = new Map();
+const ADMIN_CACHE_SECONDS = 60;
 const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const toObjectId = (value) => new mongoose.Types.ObjectId(value);
 const parsePage = (value) => Math.min(Math.max(Number.parseInt(value, 10) || 1, 1), 100000);
@@ -147,6 +148,7 @@ export const getUsers = async (req, res, next) => {
 export const getCharts = async (req, res, next) => {
   try {
     const range = ['7d', '30d', '90d', '12m'].includes(req.query.range) ? req.query.range : '30d';
+    const payload = await remember(`admin:charts:${range}`, ADMIN_CACHE_SECONDS, async () => {
     const { start, end } = dateFromRange(range);
     const [signups, volume, categories, billsByStatus] = await Promise.all([
       User.aggregate([
@@ -166,12 +168,14 @@ export const getCharts = async (req, res, next) => {
       ]),
       Bill.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }, { $sort: { _id: 1 } }]),
     ]);
-    return res.json({
+    return {
       signups,
       volume: volume.map((row) => ({ ...row, total: row.totalMinor / 100 })),
       categories: categories.map((row) => ({ ...row, total: row.totalMinor / 100 })),
       billsByStatus,
+    };
     });
+    return res.json(payload);
   } catch (err) {
     next(err);
   }
@@ -180,8 +184,7 @@ export const getCharts = async (req, res, next) => {
 export const getOverviewStats = async (req, res, next) => {
   try {
     const range = ['7d', '30d', '90d', '12m'].includes(req.query.range) ? req.query.range : '30d';
-    const cached = statsCache.get(range);
-    if (cached && cached.expiresAt > Date.now()) return res.json(cached.value);
+    const value = await remember(`admin:stats:${range}`, ADMIN_CACHE_SECONDS, async () => {
     const { start, end } = dateFromRange(range);
     const [base, activeUsers, signups7, signups30, totalBills, scannedBills, unpaidBills] = await Promise.all([
       getPlatformStats(),
@@ -192,7 +195,7 @@ export const getOverviewStats = async (req, res, next) => {
       Bill.countDocuments({ source: 'scanned' }),
       Bill.countDocuments({ $or: [{ status: 'unpaid' }, { status: 'overdue' }, { dueDate: { $lt: end }, status: 'unpaid' }] }),
     ]);
-    const value = {
+    return {
       ...base,
       activeUsers,
       newSignups7d: signups7,
@@ -203,7 +206,7 @@ export const getOverviewStats = async (req, res, next) => {
       rangeStart: start,
       rangeEnd: end,
     };
-    statsCache.set(range, { value, expiresAt: Date.now() + 60000 });
+    });
     return res.json(value);
   } catch (err) {
     next(err);

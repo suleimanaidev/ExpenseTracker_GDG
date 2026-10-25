@@ -9,6 +9,7 @@ export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [configured, setConfigured] = useState(false);
+  const [maintenance, setMaintenance] = useState(false);
 
   // Initialize auth state
   const initAuth = useCallback(async () => {
@@ -17,6 +18,7 @@ export function AuthProvider({ children }) {
       const health = await api.get('/api/health');
       if (health?.status === 'ok' || health?.status === 'degraded') {
         setConfigured(true);
+        setMaintenance(Boolean(health?.maintenance));
 
         // 2. Attempt to restore session using stored token or refresh endpoint
         try {
@@ -73,6 +75,14 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     initAuth();
   }, [initAuth]);
+
+  // Any API call that hits maintenance mode locks the UI immediately instead of
+  // leaving the user on a page whose requests silently fail.
+  useEffect(() => {
+    const handleMaintenance = () => setMaintenance(true);
+    window.addEventListener('ledger:maintenance', handleMaintenance);
+    return () => window.removeEventListener('ledger:maintenance', handleMaintenance);
+  }, []);
 
   const signUp = async (email, password, fullName) => {
     if (!configured) {
@@ -133,7 +143,7 @@ export function AuthProvider({ children }) {
         const p = await api.get('/api/profile');
         if (p) {
           setProfile(p);
-          setUser(prev => ({ ...prev, ...p }));
+          setUser((prev) => ({ ...prev, ...p }));
         }
       } catch (err) {
         console.error('Failed to refresh profile:', err);
@@ -147,6 +157,7 @@ export function AuthProvider({ children }) {
     session,
     loading,
     configured,
+    maintenance,
     signUp,
     signIn,
     signOut,

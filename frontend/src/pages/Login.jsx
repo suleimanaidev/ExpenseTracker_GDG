@@ -1,8 +1,23 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
+import { useSeo } from '../seo/useSeo';
+import { useCountdown } from '../lib/useCountdown';
+import { COOLDOWN_CAP_SECONDS } from '../lib/rateLimit';
+import '../styles/auth.css';
+
+const AUTH_POINTS = [
+  'Expense tracking with monthly budgets',
+  'AI bill and invoice scanning',
+  'Ledger AI, in English, Roman Urdu or Urdu',
+];
 
 export default function LoginPage() {
+  useSeo({
+    title: 'Sign in | Ledger',
+    description: 'Sign in to your Ledger account or create one.',
+    noindex: true,
+  });
   const navigate = useNavigate();
   const { user, signIn, signUp, configured } = useAuth();
 
@@ -11,13 +26,13 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  
+
   // Validation errors
   const [errors, setErrors] = useState({
     fullName: '',
     email: '',
     password: '',
-    confirmPassword: ''
+    confirmPassword: '',
   });
 
   // Password visibility states
@@ -28,10 +43,12 @@ export default function LoginPage() {
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [blockedUntil, setBlockedUntil] = useState(0);
+  const cooldown = useCountdown(blockedUntil);
 
   useEffect(() => {
     if (user && configured) {
-      navigate('/');
+      navigate('/overview');
     }
   }, [user, configured, navigate]);
 
@@ -61,7 +78,7 @@ export default function LoginPage() {
         }
       }
     }
-    setErrors(prev => ({ ...prev, [name]: error }));
+    setErrors((prev) => ({ ...prev, [name]: error }));
     return error;
   };
 
@@ -69,6 +86,8 @@ export default function LoginPage() {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
+
+    if (cooldown > 0) return;
 
     if (!configured) {
       setErrorMsg('Authentication service is currently offline. Please use Guest (Demo Mode).');
@@ -91,8 +110,13 @@ export default function LoginPage() {
       try {
         await signUp(email, password, fullName);
         setSuccessMsg('Account created successfully! Welcome to Ledger.');
-        setTimeout(() => navigate('/'), 600);
+        setTimeout(() => navigate('/overview'), 600);
       } catch (err) {
+        if (err.retryAfterSeconds) {
+          setBlockedUntil(
+            Date.now() + Math.min(err.retryAfterSeconds, COOLDOWN_CAP_SECONDS) * 1000
+          );
+        }
         setErrorMsg(err.message || 'An error occurred during account creation.');
       } finally {
         setSubmitting(false);
@@ -106,8 +130,13 @@ export default function LoginPage() {
       setSubmitting(true);
       try {
         await signIn(email, password);
-        navigate('/');
+        navigate('/overview');
       } catch (err) {
+        if (err.retryAfterSeconds) {
+          setBlockedUntil(
+            Date.now() + Math.min(err.retryAfterSeconds, COOLDOWN_CAP_SECONDS) * 1000
+          );
+        }
         setErrorMsg(err.message || 'An error occurred during authentication.');
       } finally {
         setSubmitting(false);
@@ -119,217 +148,308 @@ export default function LoginPage() {
   const renderEyeIcon = (isVisible) => {
     if (isVisible) {
       return (
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
-          <line x1="1" y1="1" x2="23" y2="23"/>
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+          <line x1="1" y1="1" x2="23" y2="23" />
         </svg>
       );
     }
     return (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-        <circle cx="12" cy="12" r="3"/>
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+        <circle cx="12" cy="12" r="3" />
       </svg>
     );
   };
 
-  return (
-    <div className="login-container">
-      <div className="login-card">
-        {/* Back to Home Button */}
+  const switchMode = (signUp) => {
+    setIsSignUp(signUp);
+    setErrorMsg('');
+    setSuccessMsg('');
+    setErrors({});
+  };
+
+  const fieldError = (name) =>
+    errors[name] ? (
+      <p className="auth-field-error" id={`${name}-error`} role="alert">
+        {errors[name]}
+      </p>
+    ) : null;
+
+  const passwordField = ({
+    id,
+    label,
+    value,
+    onChange,
+    onBlur,
+    show,
+    setShow,
+    placeholder,
+    auto,
+  }) => (
+    <div className="form-group">
+      <label className="form-label" htmlFor={id}>
+        {label}
+      </label>
+      <div className="password-input-container">
+        <input
+          id={id}
+          type={show ? 'text' : 'password'}
+          className="form-input"
+          placeholder={placeholder}
+          autoComplete={auto}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={onBlur}
+          required
+        />
         <button
           type="button"
-          onClick={() => navigate('/')}
-          className="back-btn"
-          aria-label="Back to home"
-          style={{
-            position: 'absolute',
-            top: '1rem',
-            left: '1rem',
-            background: 'none',
-            border: 'none',
-            color: 'var(--text-secondary)',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '0.5rem',
-            borderRadius: '50%',
-          }}
+          className="password-toggle-btn"
+          onClick={() => setShow(!show)}
+          aria-label={show ? 'Hide password' : 'Show password'}
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="19" y1="12" x2="5" y2="12"/>
-            <polyline points="12 19 5 12 12 5"/>
-          </svg>
+          {renderEyeIcon(show)}
         </button>
+      </div>
+    </div>
+  );
 
-        {/* Brand Header */}
-        <div className="login-brand">
-          <div className="login-logo font-display">LEDGER</div>
-          <p className="login-sub">Personal Finance &amp; AI Spending Intelligence</p>
-        </div>
+  return (
+    <div className="auth-shell">
+      <aside className="auth-aside" aria-label="About Ledger">
+        <div className="auth-aside-inner">
+          <a className="auth-brand" href="/" aria-label="Ledger home">
+            <span className="auth-mark">L</span>
+            <span>LEDGER</span>
+          </a>
 
-        {/* Tab Switcher */}
-        <div className="auth-tabs">
-          <button
-            type="button"
-            className={`auth-tab ${!isSignUp ? 'auth-tab--active' : ''}`}
-            onClick={() => { setIsSignUp(false); setErrorMsg(''); setSuccessMsg(''); setErrors({}); }}
-          >
-            Sign In
-          </button>
-          <button
-            type="button"
-            className={`auth-tab ${isSignUp ? 'auth-tab--active' : ''}`}
-            onClick={() => { setIsSignUp(true); setErrorMsg(''); setSuccessMsg(''); setErrors({}); }}
-          >
-            Create Account
-          </button>
-        </div>
-
-        {/* Messages */}
-        {errorMsg && <div className="alert alert--error mb-4">{errorMsg}</div>}
-        {successMsg && <div className="alert alert--success mb-4">{successMsg}</div>}
-
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="auth-form">
-          
-          {/* Full Name (Sign Up only) */}
-          {isSignUp && (
-            <div className="form-group">
-              <label className="form-label" htmlFor="reg-fullname">Full Name</label>
-              <input
-                id="reg-fullname"
-                type="text"
-                className="form-input"
-                placeholder="John Doe"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                onBlur={() => validateField('fullName', fullName)}
-                required
-              />
-              {errors.fullName && <p style={{ color: 'var(--red-light)', fontSize: '0.725rem', marginTop: '0.25rem' }}>{errors.fullName}</p>}
-            </div>
-          )}
-
-          {/* Email Address */}
-          <div className="form-group">
-            <label className="form-label" htmlFor="auth-email">Email Address</label>
-            <input
-              id="auth-email"
-              type="email"
-              className="form-input"
-              placeholder="you@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              onBlur={() => validateField('email', email)}
-              required
-            />
-            {errors.email && <p style={{ color: 'var(--red-light)', fontSize: '0.725rem', marginTop: '0.25rem' }}>{errors.email}</p>}
+          <div className="auth-pitch">
+            <h2>Know where your money goes.</h2>
+            <p>
+              Track expenses, scan bills with AI, and ask questions about your spending, all in one
+              place.
+            </p>
+            <ul className="auth-points">
+              {AUTH_POINTS.map((point) => (
+                <li key={point}>
+                  <span className="auth-tick" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <path d="m5 12 4 4L19 6" />
+                    </svg>
+                  </span>
+                  {point}
+                </li>
+              ))}
+            </ul>
           </div>
 
-          {/* Password (Sign In vs Sign Up toggle keys) */}
-          {!isSignUp ? (
-            <div className="form-group mb-6">
-              <label className="form-label" htmlFor="signin-password">Password</label>
-              <div className="password-input-container">
-                <input
-                  id="signin-password"
-                  type={showSignInPassword ? 'text' : 'password'}
-                  className="form-input"
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                />
-                <button
-                  type="button"
-                  className="password-toggle-btn"
-                  onClick={() => setShowSignInPassword(!showSignInPassword)}
-                  aria-label={showSignInPassword ? "Hide password" : "Show password"}
-                >
-                  {renderEyeIcon(showSignInPassword)}
-                </button>
-              </div>
-            </div>
-          ) : (
-            <>
-              {/* Sign Up Password */}
-              <div className="form-group">
-                <label className="form-label" htmlFor="reg-password">Password</label>
-                <div className="password-input-container">
-                  <input
-                    id="reg-password"
-                    type={showSignUpPassword ? 'text' : 'password'}
-                    className="form-input"
-                    placeholder="Min. 8 characters"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    onBlur={() => validateField('password', password)}
-                    required
-                  />
-                  <button
-                    type="button"
-                    className="password-toggle-btn"
-                    onClick={() => setShowSignUpPassword(!showSignUpPassword)}
-                    aria-label={showSignUpPassword ? "Hide password" : "Show password"}
-                  >
-                    {renderEyeIcon(showSignUpPassword)}
-                  </button>
-                </div>
-                {errors.password && <p style={{ color: 'var(--red-light)', fontSize: '0.725rem', marginTop: '0.25rem' }}>{errors.password}</p>}
-              </div>
+          <p className="auth-aside-note">
+            Passwords are hashed and every record is private to your account.
+          </p>
+        </div>
+      </aside>
 
-              {/* Confirm Password */}
-              <div className="form-group mb-6">
-                <label className="form-label" htmlFor="reg-confirm">Confirm Password</label>
-                <div className="password-input-container">
-                  <input
-                    id="reg-confirm"
-                    type={showConfirmPassword ? 'text' : 'password'}
-                    className="form-input"
-                    placeholder="••••••••"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    onBlur={() => validateField('confirmPassword', confirmPassword)}
-                    required
-                  />
-                  <button
-                    type="button"
-                    className="password-toggle-btn"
-                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                    aria-label={showConfirmPassword ? "Hide password" : "Show password"}
-                  >
-                    {renderEyeIcon(showConfirmPassword)}
-                  </button>
-                </div>
-                {errors.confirmPassword && <p style={{ color: 'var(--red-light)', fontSize: '0.725rem', marginTop: '0.25rem' }}>{errors.confirmPassword}</p>}
-              </div>
-            </>
-          )}
-
+      <main className="auth-main">
+        <div className="auth-card">
           <button
-            type="submit"
-            className="btn btn--primary w-full"
-            disabled={submitting}
+            type="button"
+            onClick={() => navigate('/')}
+            className="auth-back"
+            aria-label="Back to home"
           >
-            {submitting
-              ? (isSignUp ? 'Creating Account...' : 'Signing In...')
-              : (isSignUp ? 'Create Account' : 'Sign In')}
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <line x1="19" y1="12" x2="5" y2="12" />
+              <polyline points="12 19 5 12 12 5" />
+            </svg>
+            Back to home
           </button>
 
-          <div style={{ textAlign: 'center', marginTop: '1.25rem' }}>
-            <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.75rem' }}>or</span>
+          <div className="auth-heading">
+            <h1>{isSignUp ? 'Create your account' : 'Welcome back'}</h1>
+            <p>
+              {isSignUp
+                ? 'Start tracking your money in under a minute.'
+                : 'Sign in to continue to your ledger.'}
+            </p>
+          </div>
+
+          <div className="auth-tabs" role="tablist" aria-label="Sign in or create account">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={!isSignUp}
+              className={`auth-tab ${!isSignUp ? 'auth-tab--active' : ''}`}
+              onClick={() => switchMode(false)}
+            >
+              Sign In
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={isSignUp}
+              className={`auth-tab ${isSignUp ? 'auth-tab--active' : ''}`}
+              onClick={() => switchMode(true)}
+            >
+              Create Account
+            </button>
+          </div>
+
+          {errorMsg && (
+            <div className="alert alert--error mb-4" role="alert">
+              {errorMsg}
+            </div>
+          )}
+          {successMsg && (
+            <div className="alert alert--success mb-4" role="status">
+              {successMsg}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="auth-form" noValidate>
+            {isSignUp && (
+              <div className="form-group">
+                <label className="form-label" htmlFor="reg-fullname">
+                  Full Name
+                </label>
+                <input
+                  id="reg-fullname"
+                  type="text"
+                  className="form-input"
+                  placeholder="Your full name"
+                  autoComplete="name"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  onBlur={() => validateField('fullName', fullName)}
+                  aria-invalid={Boolean(errors.fullName)}
+                  required
+                />
+                {fieldError('fullName')}
+              </div>
+            )}
+
+            <div className="form-group">
+              <label className="form-label" htmlFor="auth-email">
+                Email Address
+              </label>
+              <input
+                id="auth-email"
+                type="email"
+                className="form-input"
+                placeholder="you@example.com"
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                onBlur={() => validateField('email', email)}
+                aria-invalid={Boolean(errors.email)}
+                required
+              />
+              {fieldError('email')}
+            </div>
+
+            {!isSignUp ? (
+              passwordField({
+                id: 'signin-password',
+                label: 'Password',
+                value: password,
+                onChange: setPassword,
+                show: showSignInPassword,
+                setShow: setShowSignInPassword,
+                placeholder: 'Enter your password',
+                auto: 'current-password',
+              })
+            ) : (
+              <>
+                <div>
+                  {passwordField({
+                    id: 'reg-password',
+                    label: 'Password',
+                    value: password,
+                    onChange: setPassword,
+                    onBlur: () => validateField('password', password),
+                    show: showSignUpPassword,
+                    setShow: setShowSignUpPassword,
+                    placeholder: 'At least 8 characters',
+                    auto: 'new-password',
+                  })}
+                  {fieldError('password')}
+                </div>
+                <div>
+                  {passwordField({
+                    id: 'reg-confirm',
+                    label: 'Confirm Password',
+                    value: confirmPassword,
+                    onChange: setConfirmPassword,
+                    onBlur: () => validateField('confirmPassword', confirmPassword),
+                    show: showConfirmPassword,
+                    setShow: setShowConfirmPassword,
+                    placeholder: 'Re-enter your password',
+                    auto: 'new-password',
+                  })}
+                  {fieldError('confirmPassword')}
+                </div>
+              </>
+            )}
+
+            <button
+              type="submit"
+              className="btn btn--primary w-full auth-submit"
+              disabled={submitting || cooldown > 0}
+            >
+              {cooldown > 0
+                ? `Try again in ${cooldown}s`
+                : submitting
+                  ? isSignUp
+                    ? 'Creating account...'
+                    : 'Signing in...'
+                  : isSignUp
+                    ? 'Create account'
+                    : 'Sign in'}
+            </button>
+
+            <div className="auth-divider">
+              <span>or</span>
+            </div>
+
             <button
               type="button"
               className="btn btn--secondary w-full"
-              onClick={() => navigate('/')}
+              onClick={() => navigate('/overview')}
             >
               Continue as Guest (Demo Mode)
             </button>
-          </div>
-        </form>
-      </div>
+            <p className="auth-hint">Guest mode keeps your data in this browser only.</p>
+          </form>
+        </div>
+      </main>
     </div>
   );
 }
