@@ -1,5 +1,6 @@
 import { useLocation, Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
+import '../styles/sidebar-admin.css';
 
 const NAV_ITEMS = [
   {
@@ -117,9 +118,11 @@ export default function Sidebar({ collapsed = false, onCollapseChange }) {
     navigate('/login');
   };
 
-  // Dynamically push Admin item if user has is_admin role
+  // Administrators get a small Admin button in the sidebar footer and an Admin item in the
+  // mobile bottom bar (the sidebar is hidden on phones).
+  const isAdmin = Boolean(profile?.is_admin || profile?.isAdmin || user?.is_admin || user?.isAdmin);
   const menuItems = [...NAV_ITEMS];
-  if (profile?.is_admin || profile?.isAdmin || user?.is_admin || user?.isAdmin) {
+  if (isAdmin) {
     menuItems.push({
       href: '/admin',
       label: 'Admin Panel',
@@ -198,7 +201,7 @@ export default function Sidebar({ collapsed = false, onCollapseChange }) {
         </div>
 
         <nav className="sidebar-nav">
-          {menuItems.map((item) => {
+          {NAV_ITEMS.map((item) => {
             const isActive =
               pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
             return (
@@ -214,6 +217,28 @@ export default function Sidebar({ collapsed = false, onCollapseChange }) {
             );
           })}
         </nav>
+        {isAdmin && (
+          <Link
+            to="/admin"
+            className={`sidebar-admin${pathname.startsWith('/admin') ? ' is-active' : ''}`}
+            title="Open the admin console"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
+            <span className="sidebar-admin-label">Admin</span>
+          </Link>
+        )}
         <button
           type="button"
           className="sidebar-logout"

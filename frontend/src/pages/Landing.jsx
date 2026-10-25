@@ -82,6 +82,18 @@ export default function LandingPage() {
           </nav>
           <div className="fin-nav-actions">
             <ThemeToggleMouse />
+            {(user?.isAdmin || user?.is_admin) && (
+              <a
+                className="fin-admin-chip"
+                href="/admin"
+                onClick={(event) => {
+                  event.preventDefault();
+                  navigate('/admin');
+                }}
+              >
+                Admin
+              </a>
+            )}
             <button className="fin-button fin-button--small" onClick={enterApp}>
               {user ? 'Open dashboard' : 'Start tracking'}
             </button>

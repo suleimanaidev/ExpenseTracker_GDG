@@ -626,6 +626,23 @@
     gap: 10px;
   }
 }
+/* Small Admin shortcut for signed-in administrators. */
+.fin-landing .fin-admin-chip {
+  padding: 4px 11px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--gold);
+  text-decoration: none;
+  background: var(--gold-dim);
+  border: 1px solid color-mix(in srgb, var(--gold) 35%, var(--border));
+  border-radius: 999px;
+  transition: background-color 0.2s ease;
+}
+
+.fin-landing .fin-admin-chip:hover {
+  background: color-mix(in srgb, var(--gold) 20%, transparent);
+}
 @media (prefers-reduced-motion: reduce) {
   .fin-landing *,
   .fin-landing *::before,
