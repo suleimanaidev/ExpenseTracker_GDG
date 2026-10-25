@@ -64,3 +64,21 @@
   line-height: 1.5;
   color: var(--text-muted);
 }
+
+/* Settings page card that opens the console. */
+.settings-admin-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-color: color-mix(in srgb, var(--gold) 35%, var(--border));
+  background: color-mix(in srgb, var(--gold) 6%, var(--bg-card));
+}
+
+.admin-open-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+}

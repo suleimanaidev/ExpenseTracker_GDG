@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 import { useSeo } from '../seo/useSeo';
 import { useCountdown } from '../lib/useCountdown';
@@ -19,7 +19,9 @@ export default function LoginPage() {
     noindex: true,
   });
   const navigate = useNavigate();
-  const { user, signIn, signUp, configured } = useAuth();
+  const { user, signIn, signUp, signOut, configured } = useAuth();
+  const [searchParams] = useSearchParams();
+  const [adminMode, setAdminMode] = useState(() => searchParams.get('admin') === '1');
 
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
@@ -47,10 +49,12 @@ export default function LoginPage() {
   const cooldown = useCountdown(blockedUntil);
 
   useEffect(() => {
-    if (user && configured) {
-      navigate('/overview');
-    }
-  }, [user, configured, navigate]);
+    if (!user || !configured) return;
+    const isAdmin = Boolean(user.isAdmin || user.is_admin);
+    // An admin sign-in with a non-admin account is a mistake, not a redirect target.
+    if (adminMode && !isAdmin) return;
+    navigate(adminMode ? '/admin' : '/overview');
+  }, [user, configured, navigate, adminMode]);
 
   const validateField = (name, value) => {
     let error = '';
@@ -129,8 +133,16 @@ export default function LoginPage() {
 
       setSubmitting(true);
       try {
-        await signIn(email, password);
-        navigate('/overview');
+        const data = await signIn(email, password);
+        const signedIn = data?.user;
+        if (adminMode && !(signedIn?.isAdmin || signedIn?.is_admin)) {
+          await signOut();
+          setErrorMsg(
+            'This account is not an administrator. Sign in normally, or ask an admin to promote it.'
+          );
+          return;
+        }
+        navigate(adminMode ? '/admin' : '/overview');
       } catch (err) {
         if (err.retryAfterSeconds) {
           setBlockedUntil(
@@ -294,13 +306,45 @@ export default function LoginPage() {
           </button>
 
           <div className="auth-heading">
-            <h1>{isSignUp ? 'Create your account' : 'Welcome back'}</h1>
+            <h1>
+              {isSignUp ? 'Create your account' : adminMode ? 'Administrator' : 'Welcome back'}
+            </h1>
             <p>
               {isSignUp
                 ? 'Start tracking your money in under a minute.'
-                : 'Sign in to continue to your ledger.'}
+                : adminMode
+                  ? 'Sign in with an administrator account to open the console.'
+                  : 'Sign in to continue to your ledger.'}
             </p>
           </div>
+
+          {!isSignUp && (
+            <button
+              type="button"
+              className={'auth-admin-toggle' + (adminMode ? ' is-on' : '')}
+              onClick={() => {
+                setAdminMode((current) => !current);
+                setErrorMsg('');
+                setSuccessMsg('');
+              }}
+              aria-pressed={adminMode}
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+              </svg>
+              {adminMode ? 'Administrator sign-in' : 'Admin sign-in'}
+            </button>
+          )}
 
           <div className="auth-tabs" role="tablist" aria-label="Sign in or create account">
             <button

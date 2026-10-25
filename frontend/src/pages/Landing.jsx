@@ -452,6 +452,9 @@ export default function LandingPage() {
             <button type="button" onClick={() => navigate('/overview')}>
               Try demo mode
             </button>
+            <button type="button" onClick={() => navigate('/login?admin=1')}>
+              Admin sign-in
+            </button>
           </nav>
 
           <div className="fin-foot-col">

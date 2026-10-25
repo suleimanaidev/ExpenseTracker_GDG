@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useData } from '../lib/DataContext';
 import { useAuth } from '../lib/AuthContext';
 import { DEFAULT_CATEGORIES } from '../lib/categories';
@@ -73,6 +74,7 @@ export default function SettingsPage() {
     clearAllData,
   } = useData();
   const { user, configured } = useAuth();
+  const isAdmin = Boolean(user?.isAdmin || user?.is_admin);
   const { notify } = useToast();
 
   const [budgetDraft, setBudgetDraft] = useState('');
@@ -221,6 +223,34 @@ export default function SettingsPage() {
           </div>
         </div>
       </div>
+
+      {/* Admin console: only administrators see this card. */}
+      {isAdmin && (
+        <div className="card settings-section settings-admin-card mb-6">
+          <div>
+            <h3 className="settings-section-title font-display">Administrator</h3>
+            <p className="settings-section-description">
+              Users, platform spending, AI usage, audit log and system health.
+            </p>
+          </div>
+          <Link to="/admin" className="btn btn--gold admin-open-button">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
+            Open admin panel
+          </Link>
+        </div>
+      )}
 
       {/* Monthly Budget */}
       <div className="card settings-section">
