@@ -9,7 +9,7 @@ import {
 } from '../services/aiService.js';
 import { scanBillWithGemini, scanFailureStatus } from '../services/billScanService.js';
 import { validateBillProposal, validateExpenseProposal } from '../schemas/aiProposalSchema.js';
-import { parseBillScanResult } from '../schemas/billSchema.js';
+import { ensureCurrency, parseBillScanResult } from '../schemas/billSchema.js';
 import { estimateRunwayDate } from '../utils/financeCalculations.js';
 import { summarizeBills, resolveBillStatus, toMajor } from '../utils/billCalculations.js';
 import { buildSpendingAnswer } from '../utils/spendingAnswer.js';
@@ -346,6 +346,7 @@ Reply in exactly that language: English in English, Roman Urdu in Latin-script U
 Sound human: warm, direct, and conversational. Write plain text only â€” no markdown stars, no headings, no tables, no emoji. For a normal question answer in one to three short sentences: the answer first, then at most one useful detail. Use short separate lines only when the user asks for a list.
 Category precision: when the user asks about one category (Food, Transport, Shopping, Utilities...), use only that category's amount and transaction count from the breakdown above. Do not mention the monthly budget, the remaining budget or the overall total unless they ask for an overall summary. Say the exact amount, the number of transactions, and at most one brief comparison if the data supports it.
 Example: "is mahine food par kitna kharch hua?" -> "Is mahine aapne Food & Dining par total PKR 13,400 kharch kiye hain (5 transactions ke sath)."
+Answer only what was asked. For a greeting or small talk ("hello", "hi", "salam", "thanks", "how are you"), reply with one short friendly line in the same language and offer help; do not mention budget, spending, balances or any amount, and do not summarise their finances unless they ask.
 Never invent a number that is not in the data above. If the data does not contain the answer, say so plainly.
 Interpret 3k as 3000, 1.5k as 1500, dedh hazar as 1500, and do sau as 200.
 Resolve kal/yesterday, parson and aaj using today's date. Use only the listed categories. Unknown values must be null.
@@ -409,13 +410,36 @@ export const chatInsight = async (req, res, next) => {
           code: 'INVALID_AI_PROPOSAL',
         });
       }
-      const withoutNulls = (value) =>
-        Object.fromEntries(Object.entries(value).filter(([, v]) => v !== null && v !== undefined));
-      const { items, ...rest } = normalized.data;
-      const proposal = validateBillProposal(
-        { ...withoutNulls(rest), items: items.map(withoutNulls) },
-        categories
-      );
+      // A document can legitimately print a zero quantity or a credit line (negative).
+      // The proposal schema only accepts positive quantities and non-negative amounts,
+      // so those values are dropped and its defaults apply, instead of failing the
+      // whole invoice with a 500.
+      const usable = (value, allowZero) =>
+        value !== null && value !== undefined && (allowZero ? value >= 0 : value > 0);
+      const clean = (object, rules) =>
+        Object.fromEntries(
+          Object.entries(object).filter(([key, value]) =>
+            key in rules ? usable(value, rules[key]) : value !== null && value !== undefined
+          )
+        );
+      const { items, ...rest } = ensureCurrency(normalized.data, ctx.currency);
+      let proposal;
+      try {
+        proposal = validateBillProposal(
+          {
+            ...clean(rest, { subtotal: true, tax: true, discount: true, total: true }),
+            items: items.map((item) =>
+              clean(item, { quantity: false, unitPrice: true, lineTotal: true })
+            ),
+          },
+          categories
+        );
+      } catch {
+        return res.status(422).json({
+          error: 'I could not read that document reliably. Try a clearer photo or enter it manually.',
+          code: 'INVALID_AI_PROPOSAL',
+        });
+      }
       await recordAiUsage({
         user: req.user._id,
         type: 'scan',

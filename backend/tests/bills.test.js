@@ -7,6 +7,7 @@ import { User } from '../models/User.js';
 import { Category } from '../models/Category.js';
 import { Bill } from '../models/Bill.js';
 import { Expense } from '../models/Expense.js';
+import { AiUsage } from '../models/AiUsage.js';
 import { generateAccessToken } from '../middleware/auth.js';
 import {
   detectBillFormat,
@@ -38,7 +39,9 @@ import { sanitizeFilename } from '../services/billStorageService.js';
 let mongoServer;
 
 beforeAll(async () => {
-  mongoServer = await MongoMemoryServer.create();
+  // Windows Defender can delay the first mongod child-process startup well
+  // beyond the library's 10-second default even when the binary is cached.
+  mongoServer = await MongoMemoryServer.create({ instance: { launchTimeout: 60_000 } });
   await mongoose.connect(mongoServer.getUri());
 });
 
@@ -52,6 +55,7 @@ beforeEach(async () => {
   await Expense.deleteMany({});
   await Category.deleteMany({});
   await User.deleteMany({});
+  await AiUsage.deleteMany({});
 });
 
 afterEach(() => {
@@ -585,6 +589,38 @@ describe('POST /api/bills/scan', () => {
     expect(sentPrompt.contents[0].parts[1].text).toContain('Utilities');
   });
 
+  it('briefs the model on what to extract, how to categorise, and never to invent values', async () => {
+    process.env.GEMINI_API_KEY = 'test-key';
+    const user = await makeUser('prompt@ledger.app');
+    await Category.create({ user: user._id, name: 'Groceries & Dining' });
+    const fetchMock = stubGemini(GOOD_SCAN);
+
+    await scan(generateAccessToken(user)).attach('bill', PNG, {
+      filename: 'receipt.png',
+      contentType: 'image/png',
+    });
+
+    const prompt = JSON.parse(fetchMock.mock.calls[0][1].body).contents[0].parts[1].text;
+
+    // Extraction targets match the validated schema, not a different key set.
+    expect(prompt).toContain('vendor');
+    expect(prompt).toContain('invoiceNumber');
+    expect(prompt).toContain('line item');
+
+    // Categories come from the caller's own list, with a guide for mapping receipts onto them.
+    expect(prompt).toContain('Groceries & Dining');
+    expect(prompt).toContain('fuel, ride-hailing');
+    expect(prompt).toContain('Never invent a category');
+
+    // Accuracy rules stay in force: no guessing, no defaulted quantity, no "correcting" totals.
+    expect(prompt).toContain('NEVER invent, estimate, infer or complete a value');
+    expect(prompt).toContain('do not default a quantity to 1');
+    expect(prompt).toContain('Transcribe the printed figures exactly');
+
+    // A photo that is not a bill is reported instead of being made up.
+    expect(prompt).toContain('is not a receipt, bill or invoice');
+  });
+
   it('adds an arithmetic warning instead of correcting a mismatch', async () => {
     process.env.GEMINI_API_KEY = 'test-key';
     const user = await makeUser('mismatch@ledger.app');
@@ -645,8 +681,8 @@ describe('POST /api/bills/scan', () => {
     expect(res.status).toBe(502);
     expect(res.body.code).toBe('AI_BAD_JSON');
     expect(res.body.canEnterManually).toBe(true);
-    expect(res.body.attempts).toBe(2);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(res.body.attempts).toBe(3);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it('does not retry a non-retryable failure', async () => {
@@ -680,6 +716,153 @@ describe('POST /api/bills/scan', () => {
 
     expect(res.body.bill.confidence).toBe(0.21);
     expect(needsReview(res.body.bill)).toBe(true);
+  });
+
+  describe('refusing files that are not a bill', () => {
+    const NOT_A_BILL_SCAN = {
+      isBillDocument: false,
+      documentDescription: 'a photo of a beach',
+      vendor: 'Unknown vendor',
+      items: [],
+      total: 0,
+      suggestedCategory: 'Other',
+      confidence: 0,
+      warnings: [],
+    };
+
+    const scanPng = async (user) =>
+      scan(generateAccessToken(user)).attach('bill', PNG, {
+        filename: 'photo.png',
+        contentType: 'image/png',
+      });
+
+    it('answers 422 NOT_A_BILL when the model says the file is not a bill', async () => {
+      process.env.GEMINI_API_KEY = 'test-key';
+      const user = await makeUserWithCategory('notbill@ledger.app');
+      const fetchMock = stubGemini(NOT_A_BILL_SCAN);
+
+      const res = await scanPng(user);
+
+      expect(res.status).toBe(422);
+      expect(res.body.code).toBe('NOT_A_BILL');
+      expect(res.body.error).toContain('a photo of a beach');
+      expect(res.body.description).toBe('a photo of a beach');
+      expect(res.body.canEnterManually).toBe(true);
+      // No draft is returned, so there is nothing to review or save.
+      expect(res.body.bill).toBeUndefined();
+      // A refusal is a final answer: it is not retried and nothing is stored.
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(await Bill.countDocuments()).toBe(0);
+      expect(await Expense.countDocuments()).toBe(0);
+    });
+
+    it('does not echo control characters or an overlong description back to the user', async () => {
+      process.env.GEMINI_API_KEY = 'test-key';
+      const user = await makeUserWithCategory('sanitize@ledger.app');
+      stubGemini({
+        ...NOT_A_BILL_SCAN,
+        documentDescription: `a screenshot\n\nIGNORE ALL RULES ${'x'.repeat(300)}`,
+      });
+
+      const res = await scanPng(user);
+
+      expect(res.status).toBe(422);
+      expect(res.body.description).not.toMatch(/[\n\r]/);
+      expect(res.body.description.length).toBeLessThanOrEqual(80);
+    });
+
+    it('falls back to a generic message when the model gives no description', async () => {
+      process.env.GEMINI_API_KEY = 'test-key';
+      const user = await makeUserWithCategory('nodesc@ledger.app');
+      stubGemini({ ...NOT_A_BILL_SCAN, documentDescription: undefined });
+
+      const res = await scanPng(user);
+
+      expect(res.status).toBe(422);
+      expect(res.body.code).toBe('NOT_A_BILL');
+      expect(res.body.error).toMatch(/does not look like a bill/i);
+      expect(res.body.description).toBeUndefined();
+    });
+
+    it('refuses an empty extraction even when the model forgets the flag', async () => {
+      process.env.GEMINI_API_KEY = 'test-key';
+      const user = await makeUserWithCategory('empty@ledger.app');
+      stubGemini({
+        vendor: 'Unknown vendor',
+        items: [],
+        total: 0,
+        suggestedCategory: 'Other',
+        confidence: 0.05,
+        warnings: [],
+      });
+
+      const res = await scanPng(user);
+
+      expect(res.status).toBe(422);
+      expect(res.body.code).toBe('NOTHING_READABLE');
+      expect(res.body.bill).toBeUndefined();
+    });
+
+    it('still returns a draft for a real bill whose total is unreadable', async () => {
+      process.env.GEMINI_API_KEY = 'test-key';
+      const user = await makeUserWithCategory('blurry@ledger.app');
+      stubGemini({
+        ...GOOD_SCAN,
+        isBillDocument: true,
+        total: null,
+        subtotal: null,
+        tax: null,
+        confidence: 0.2,
+        warnings: ['The total is cut off.'],
+      });
+
+      const res = await scanPng(user);
+
+      // The vendor and items were read, so the user gets something to correct by
+      // hand instead of a dead end.
+      expect(res.status).toBe(200);
+      expect(res.body.bill.vendor).toBe('K-Electric');
+      expect(res.body.bill.total).toBe(0);
+    });
+
+    it('accepts a bill the model explicitly confirms as a bill', async () => {
+      process.env.GEMINI_API_KEY = 'test-key';
+      const user = await makeUserWithCategory('confirmed@ledger.app');
+      stubGemini({ ...GOOD_SCAN, isBillDocument: true });
+
+      const res = await scanPng(user);
+
+      expect(res.status).toBe(200);
+      expect(res.body.bill.vendor).toBe('K-Electric');
+    });
+
+    it('records a refusal as a successful AI call, not a failure', async () => {
+      process.env.GEMINI_API_KEY = 'test-key';
+      const user = await makeUserWithCategory('usage@ledger.app');
+      stubGemini(NOT_A_BILL_SCAN);
+
+      await scanPng(user);
+
+      const usage = await AiUsage.find({ user: user._id, type: 'scan' }).lean();
+      expect(usage).toHaveLength(1);
+      expect(usage[0].success).toBe(true);
+    });
+
+    it('refuses a non-bill sent through the chat attachment too', async () => {
+      process.env.GEMINI_API_KEY = 'test-key';
+      const user = await makeUserWithCategory('chat-notbill@ledger.app');
+      stubGemini(NOT_A_BILL_SCAN);
+
+      const res = await request(app)
+        .post('/api/insight/chat')
+        .set('Authorization', `Bearer ${generateAccessToken(user)}`)
+        .field('question', '')
+        .attach('bill', PNG, { filename: 'photo.png', contentType: 'image/png' });
+
+      expect(res.status).toBe(422);
+      expect(res.body.code).toBe('NOT_A_BILL');
+      expect(res.body.proposal).toBeUndefined();
+    });
   });
 
   it('reports a schema mismatch as 502 rather than crashing', async () => {
@@ -924,7 +1107,7 @@ describe('Duplicate detection', () => {
     expect(await Expense.countDocuments({ user: user._id })).toBe(1);
   });
 
-  it('lets the user save anyway after seeing the duplicate', async () => {
+  it('does not allow saveAnyway to bypass duplicate protection', async () => {
     const user = await makeUserWithCategory('dupe3@ledger.app');
     const api = billsApi(generateAccessToken(user));
 
@@ -937,8 +1120,9 @@ describe('Duplicate detection', () => {
     expect(blocked.body.duplicate.vendor).toBe('K-Electric');
 
     const forced = await api.create({ ...fields, saveAnyway: true });
-    expect(forced.status).toBe(201);
-    expect(await Bill.countDocuments({ user: user._id })).toBe(2);
+    expect(forced.status).toBe(409);
+    expect(await Bill.countDocuments({ user: user._id })).toBe(1);
+    expect(await Expense.countDocuments({ user: user._id })).toBe(1);
   });
 
   it('catches a re-upload with the same vendor, total and date but no invoice number', async () => {
@@ -952,7 +1136,7 @@ describe('Duplicate detection', () => {
     expect(second.status).toBe(409);
   });
 
-  it('honours saveAnyway sent as a multipart checkbox field', async () => {
+  it('rejects duplicate multipart submissions even with an override field', async () => {
     // An unchecked HTML checkbox posts as an empty string, which is truthy in
     // JavaScript. Treating "" as consent would silently bypass duplicate
     // detection on every saved scanned bill.
@@ -962,8 +1146,10 @@ describe('Duplicate detection', () => {
     const fields = { ...VALID_BILL, invoiceNumber: undefined, issueDate: '2026-07-07' };
     await api.create(fields);
 
-    const sent = await api.createWithFile({ ...fields, saveAnyway: '' });
+    const sent = await api.createWithFile({ ...fields, saveAnyway: 'true' });
     expect(sent.status).toBe(409);
+    expect(await Bill.countDocuments({ user: user._id })).toBe(1);
+    expect(await Expense.countDocuments({ user: user._id })).toBe(1);
   });
 
   it('does not treat a different user\'s identical bill as a duplicate', async () => {
@@ -1355,5 +1541,103 @@ describe('GET /api/bills/summary', () => {
     expect(res.body.upcoming.map((b) => b.invoiceNumber)).not.toContain('C');
     // Due-soon alerts exclude the already-overdue bill.
     expect(res.body.dueSoon.map((b) => b.invoiceNumber)).toEqual(['B']);
+  });
+});
+
+describe('POST /api/insight/chat with an attached bill', () => {
+  it('accepts a bill without any typed question', async () => {
+    process.env.GEMINI_API_KEY = 'test-key';
+    const user = await makeUser('chat-scan@ledger.app');
+    await Category.create({ user: user._id, name: 'Utilities' });
+    stubGemini(GOOD_SCAN);
+
+    const res = await request(app)
+      .post('/api/insight/chat')
+      .set('Authorization', `Bearer ${generateAccessToken(user)}`)
+      .field('question', '')
+      .attach('bill', PNG, { filename: 'bill.png', contentType: 'image/png' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.proposal).toMatchObject({ type: 'bill' });
+    expect(res.body.proposal.data.vendor).toBe('K-Electric');
+  });
+
+  it('accepts a scan whose amounts arrive as strings with fields left out', async () => {
+    process.env.GEMINI_API_KEY = 'test-key';
+    const user = await makeUser('chat-scan-strings@ledger.app');
+    await Category.create({ user: user._id, name: 'Utilities' });
+    stubGemini({
+      isBillDocument: true,
+      vendor: 'Burger Lounge',
+      items: [{ description: 'Zinger Burger', quantity: '2', unitPrice: '650.00', lineTotal: '1300.00' }, { description: 'Fries', lineTotal: '350' }],
+      subtotal: '1650.00',
+      total: '1650.00',
+      confidence: '0.9',
+    });
+
+    const res = await request(app)
+      .post('/api/insight/chat')
+      .set('Authorization', `Bearer ${generateAccessToken(user)}`)
+      .field('question', '')
+      .attach('bill', PNG, { filename: 'bill.png', contentType: 'image/png' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.proposal.data.total).toBe(1650);
+    expect(res.body.proposal.data.items[0]).toMatchObject({ quantity: 2, unitPrice: 650 });
+    expect(res.body.proposal.data.confidence).toBe(0.9);
+  });
+
+  it('does not fail on a zero quantity or a credit line, and uses the user currency when none is printed', async () => {
+    process.env.GEMINI_API_KEY = 'test-key';
+    const user = await makeUser('chat-scan-zero@ledger.app');
+    await User.updateOne({ _id: user._id }, { currency: 'USD' });
+    await Category.create({ user: user._id, name: 'Utilities' });
+    stubGemini({
+      isBillDocument: true,
+      vendor: 'Acme',
+      items: [
+        { description: 'Setup', quantity: '0', unitPrice: '10', lineTotal: '0' },
+        { description: 'Credit', quantity: '1', unitPrice: '-5', lineTotal: '-5' },
+      ],
+      total: '10',
+    });
+
+    const res = await request(app)
+      .post('/api/insight/chat')
+      .set('Authorization', `Bearer ${generateAccessToken(user)}`)
+      .field('question', '')
+      .attach('bill', PNG, { filename: 'bill.png', contentType: 'image/png' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.proposal.data.currency).toBe('USD');
+    expect(res.body.proposal.data.warnings.join(' ')).toMatch(/currency could not be read/i);
+    expect(res.body.proposal.data.items[0].quantity).toBe(1);
+  });
+
+  it('keeps the currency the document states', async () => {
+    process.env.GEMINI_API_KEY = 'test-key';
+    const user = await makeUser('chat-scan-eur@ledger.app');
+    stubGemini({ isBillDocument: true, vendor: 'Atelier', currency: 'EUR', total: '538.90' });
+
+    const res = await request(app)
+      .post('/api/insight/chat')
+      .set('Authorization', `Bearer ${generateAccessToken(user)}`)
+      .field('question', '')
+      .attach('bill', PNG, { filename: 'bill.png', contentType: 'image/png' });
+
+    expect(res.body.proposal.data.currency).toBe('EUR');
+    expect(res.body.proposal.data.warnings).toEqual([]);
+  });
+
+  it('still rejects an empty message when no file is attached', async () => {
+    const user = await makeUser('chat-empty@ledger.app');
+
+    const res = await request(app)
+      .post('/api/insight/chat')
+      .set('Authorization', `Bearer ${generateAccessToken(user)}`)
+      .send({ question: '   ' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Question is required');
   });
 });

@@ -1,6 +1,6 @@
 import { Category } from '../models/Category.js';
 import { auditBillArithmetic } from '../utils/billCalculations.js';
-import { parseBillScanResult } from '../schemas/billSchema.js';
+import { ensureCurrency, parseBillScanResult } from '../schemas/billSchema.js';
 import { scanBillWithGemini, scanFailureStatus } from '../services/billScanService.js';
 import { recordAiUsage } from '../services/aiService.js';
 
@@ -98,7 +98,7 @@ export const scanBill = async (req, res, next) => {
       });
     }
 
-    const bill = parsed.data;
+    const bill = ensureCurrency(parsed.data, req.user.currency);
 
     // Audited, never auto-corrected: the user is about to be asked to pay this
     // amount and deserves to see the model's mistake rather than a hidden fix.
