@@ -7,6 +7,7 @@ import { confidenceLevel } from '../lib/confidence';
 import { formatCurrency } from '../lib/categories';
 import PageSkeleton from '../components/PageSkeleton';
 import ChatSidebar from '../components/ChatSidebar';
+import ExpenseProposalCard from '../components/ExpenseProposalCard';
 import '../styles/chat-page.css';
 
 export default function InsightsPage() {
@@ -25,6 +26,7 @@ export default function InsightsPage() {
     deleteConversation,
     renameConversation,
     categories,
+    addEntry,
     reload,
   } = useData();
   const { notify } = useToast();
@@ -36,6 +38,15 @@ export default function InsightsPage() {
   const [voiceError, setVoiceError] = useState('');
   const [dragging, setDragging] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [voiceLang, setVoiceLang] = useState(
+    () => localStorage.getItem('ledger:voice-lang') || 'en-IN'
+  );
+  const [speakReplies, setSpeakReplies] = useState(
+    () => localStorage.getItem('ledger:speak-replies') === 'true'
+  );
+  const sendRef = useRef(null);
+  const heardRef = useRef('');
+  const sentByVoiceRef = useRef(false);
   const fileInputRef = useRef(null);
   const recognitionRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -52,7 +63,13 @@ export default function InsightsPage() {
     typeof window !== 'undefined' &&
     ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
 
-  useEffect(() => () => recognitionRef.current?.stop(), []);
+  useEffect(
+    () => () => {
+      recognitionRef.current?.abort?.();
+      window.speechSynthesis?.cancel();
+    },
+    []
+  );
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -82,7 +99,36 @@ export default function InsightsPage() {
     setAttachmentError('');
     setVoiceError('');
 
-    await sendChatMessage({ question: q, file, note });
+    const viaVoice = sentByVoiceRef.current;
+    sentByVoiceRef.current = false;
+    window.speechSynthesis?.cancel();
+
+    const data = await sendChatMessage({ question: q, file, note });
+    const reply = data?.reply || data?.answers;
+    if (reply && (viaVoice || speakReplies)) speak(toPlainText(reply));
+  }
+
+  // Replies are read aloud when the question was spoken, or when the speaker toggle is on.
+  // Urdu script uses an Urdu voice; Roman Urdu and English read best with an Indian-English one.
+  function speak(text) {
+    if (!('speechSynthesis' in window) || !text) return;
+    const utterance = new SpeechSynthesisUtterance(text.slice(0, 600));
+    utterance.lang = /[\u0600-\u06ff]/.test(text) ? 'ur-PK' : 'en-IN';
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+  }
+
+  function toggleSpeakReplies() {
+    const next = !speakReplies;
+    setSpeakReplies(next);
+    localStorage.setItem('ledger:speak-replies', String(next));
+    if (!next) window.speechSynthesis?.cancel();
+  }
+
+  function toggleVoiceLang() {
+    const next = voiceLang === 'en-IN' ? 'ur-PK' : 'en-IN';
+    setVoiceLang(next);
+    localStorage.setItem('ledger:voice-lang', next);
   }
 
   function startNewChat() {
@@ -128,6 +174,9 @@ export default function InsightsPage() {
     setListening(false);
   }
 
+  // Press the mic, speak, and the message is sent when you stop (or pause), the way
+  // a voice assistant works. A tap while listening stops early and still sends what
+  // was heard. The transcript streams into the box so you can see it as you speak.
   function startListening() {
     if (!speechSupported) {
       setVoiceError('Voice input is not supported in this browser. Try Chrome or Edge.');
@@ -140,29 +189,27 @@ export default function InsightsPage() {
 
     setVoiceError('');
     setAttachmentError('');
+    window.speechSynthesis?.cancel();
+    heardRef.current = '';
 
     const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognition = new Recognition();
-    const baseInput = chatInput.trim();
 
-    recognition.lang = navigator.language || 'en-IN';
-    recognition.continuous = true;
+    recognition.lang = voiceLang;
+    recognition.continuous = false;
     recognition.interimResults = true;
 
     recognition.onresult = (event) => {
-      let finalText = '';
-      let interimText = '';
+      let text = '';
       for (let i = 0; i < event.results.length; i += 1) {
-        const result = event.results[i];
-        const transcript = result[0]?.transcript || '';
-        if (result.isFinal) finalText += transcript;
-        else interimText += transcript;
+        text += event.results[i][0]?.transcript || '';
       }
-      const joined = `${baseInput}${baseInput ? ' ' : ''}${finalText}${interimText}`;
-      setChatInput(joined.slice(0, 500));
+      heardRef.current = text.trim();
+      setChatInput(heardRef.current.slice(0, 500));
     };
 
     recognition.onerror = (event) => {
+      heardRef.current = '';
       setListening(false);
       if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
         setVoiceError(
@@ -175,7 +222,16 @@ export default function InsightsPage() {
       }
     };
 
-    recognition.onend = () => setListening(false);
+    recognition.onend = () => {
+      setListening(false);
+      const heard = heardRef.current;
+      heardRef.current = '';
+      if (heard) {
+        sentByVoiceRef.current = true;
+        sendRef.current?.(null, heard);
+      }
+    };
+
     recognitionRef.current = recognition;
     setListening(true);
 
@@ -187,6 +243,29 @@ export default function InsightsPage() {
     }
   }
 
+  // The recognizer's callbacks outlive a render; this keeps them calling the latest send.
+  sendRef.current = sendChat;
+
+  async function confirmExpenses(items, messageIndex) {
+    try {
+      for (const item of items) {
+        await addEntry(item.amount, item.category, item.note, item.date || undefined);
+      }
+      setMessages((prev) =>
+        prev.map((msg, index) =>
+          index === messageIndex
+            ? {
+                ...msg,
+                proposal: null,
+                text: items.length === 1 ? 'Expense saved.' : `${items.length} expenses saved.`,
+              }
+            : msg
+        )
+      );
+    } catch (err) {
+      notify(err.message || 'Could not save this expense.', 'error');
+    }
+  }
   async function confirmProposal(proposal, messageIndex) {
     try {
       const payload = {
@@ -354,6 +433,21 @@ export default function InsightsPage() {
                     className={`chat-bubble ${msg.role === 'user' ? 'chat-bubble--user' : 'chat-bubble--ai'}`}
                   >
                     <div className="chat-bubble-text">{toPlainText(msg.text)}</div>
+                    {msg.proposal?.type === 'expense' && (
+                      <ExpenseProposalCard
+                        proposal={msg.proposal}
+                        categories={categories}
+                        currency={currency}
+                        onConfirm={(items) => confirmExpenses(items, idx)}
+                        onCancel={() =>
+                          setMessages((prev) =>
+                            prev.map((item, index) =>
+                              index === idx ? { ...item, proposal: null } : item
+                            )
+                          )
+                        }
+                      />
+                    )}
                     {msg.proposal?.type === 'bill' && (
                       <ProposalCard
                         proposal={msg.proposal}
@@ -429,7 +523,7 @@ export default function InsightsPage() {
           {listening && (
             <div className="chat-listening" role="status">
               <span className="chat-listening-dot" aria-hidden="true" />
-              Listening… speak now, then tap the mic to stop.
+              Listening… speak now. It sends when you stop talking.
             </div>
           )}
 
@@ -489,6 +583,44 @@ export default function InsightsPage() {
 
             <button
               type="button"
+              className="chat-voice-lang"
+              onClick={toggleVoiceLang}
+              aria-label={`Voice language: ${voiceLang === 'en-IN' ? 'English' : 'Urdu'}. Tap to switch.`}
+              title="Voice language"
+            >
+              {voiceLang === 'en-IN' ? 'EN' : 'اردو'}
+            </button>
+
+            <button
+              type="button"
+              className={`chat-tool-button${speakReplies ? ' is-on' : ''}`}
+              onClick={toggleSpeakReplies}
+              aria-pressed={speakReplies}
+              aria-label={speakReplies ? 'Stop reading replies aloud' : 'Read replies aloud'}
+              title={speakReplies ? 'Replies are read aloud' : 'Read replies aloud'}
+            >
+              <svg
+                width="19"
+                height="19"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.9"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M11 5 6 9H3v6h3l5 4Z" />
+                {speakReplies ? (
+                  <path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" />
+                ) : (
+                  <path d="m16 9 5 6m0-6-5 6" />
+                )}
+              </svg>
+            </button>
+
+            <button
+              type="button"
               className={`chat-tool-button chat-mic-button${listening ? ' is-listening' : ''}`}
               onClick={startListening}
               disabled={!speechSupported}
@@ -544,7 +676,8 @@ export default function InsightsPage() {
           </div>
 
           <p className="chat-composer-hint">
-            Enter to send · Shift + Enter for a new line · JPG, PNG, WEBP or PDF up to 8 MB
+            Enter to send · tap the mic and speak to ask, add an expense or add a bill · JPG, PNG,
+            WEBP or PDF up to 8 MB
           </p>
         </form>
 

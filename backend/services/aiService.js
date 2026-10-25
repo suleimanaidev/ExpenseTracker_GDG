@@ -1,11 +1,56 @@
 /**
- * Google Gemini AI Integration Service (gemini-2.5-flash)
+ * Google Gemini AI Integration Service.
  */
 
 import { SUPPORTED_CURRENCIES } from '../utils/billCalculations.js';
 import { AiUsage } from '../models/AiUsage.js';
+import { claudeChat, claudeInsight } from './claudeService.js';
+import { toGeminiTools } from './chatTools.js';
+import {
+  NO_PROVIDER_MESSAGE,
+  compatChat,
+  compatInsight,
+  configuredProviders,
+} from './aiProviders.js';
 
-export const recordAiUsage = async ({ user, type, success, latencyMs, tokens = null, model = 'gemini-2.5-flash' }) => {
+const GEMINI_MODEL = 'gemini-3.5-flash-lite';
+const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+
+// Flash Lite is the fastest model available on this key: ~2-5s per answer,
+// against 40-120s for 3.8 Flash's hidden reasoning phase. It also rejects
+// `thinkingConfig` with a 400, so no thinking block is sent for chat/insight.
+// Bill scans deliberately stay on 3.5 Flash in billScanService, where reading a
+// photographed invoice correctly matters more than a couple of seconds.
+const GEMINI_TIMEOUT_MS = 60000;
+
+// Gemini occasionally returns a transient overload while the model is busy.
+// Retrying those statuses keeps a chat turn from dying on a momentary blip.
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+
+const fetchGemini = async (url, options, { attempts = 3, baseDelayMs = 800 } = {}) => {
+  let response;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    response = await fetch(url, options);
+    if (response.ok || !RETRYABLE_STATUS.has(response.status)) return response;
+    // With another provider configured, an exhausted quota is handed over at once
+    // instead of waiting through retries that cannot succeed.
+    if (response.status === 429 && configuredProviders().length > 1) return response;
+    if (attempt < attempts - 1) {
+      // Quota windows are measured in seconds, so short 400ms retries burn all
+      // three attempts before the rate limit resets.
+      const retryAfter = Number(response.headers?.get?.('retry-after')) * 1000;
+      const wait = Number.isFinite(retryAfter) && retryAfter > 0
+        ? Math.min(retryAfter, 6000)
+        : baseDelayMs * (attempt + 1);
+      await new Promise((resolve) => setTimeout(resolve, wait));
+    }
+  }
+
+  return response;
+};
+
+export const recordAiUsage = async ({ user, type, success, latencyMs, tokens = null, model = GEMINI_MODEL }) => {
   return AiUsage.create({ user, type, success, latencyMs, tokens, model });
 };
 
@@ -19,7 +64,7 @@ export const recordAiUsage = async ({ user, type, success, latencyMs, tokens = n
  * ability to correct a misread number.
  *
  * The category list is baked into the enum, so the model cannot invent a
- * category the user does not own — it has to pick from what they actually have,
+ * category the user does not own â€” it has to pick from what they actually have,
  * or fall back to a guess the user then corrects on the card.
  */
 export const buildBillDraftTool = (categoryNames = []) => ({
@@ -27,7 +72,7 @@ export const buildBillDraftTool = (categoryNames = []) => ({
     {
       name: 'draftBill',
       description:
-        'Record an invoice or bill the user tells you about. Call this only when the user wants to add, log or save a bill — never to answer a question about their spending. If the user asks a question instead, answer it normally without calling this.',
+        'Record an invoice or bill the user tells you about. Call this only when the user wants to add, log or save a bill â€” never to answer a question about their spending. If the user asks a question instead, answer it normally without calling this.',
       parameters: {
         type: 'OBJECT',
         properties: {
@@ -77,19 +122,19 @@ export const buildBillDraftTool = (categoryNames = []) => ({
   ],
 });
 
-export const generateAIInsight = async (prompt, systemInstruction) => {
+const geminiInsight = async (prompt, systemInstruction) => {
   const apiKey = process.env.GEMINI_API_KEY;
 
   if (!apiKey) {
     return {
-      insight: 'Gemini API key is not configured on the backend server. Please set GEMINI_API_KEY in backend/.env to enable spending insights.',
+      insight: NO_PROVIDER_MESSAGE,
       isFallback: true,
     };
   }
 
-  const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+  const apiUrl = `${GEMINI_ENDPOINT}?key=${apiKey}`;
 
-  const response = await fetch(apiUrl, {
+  const response = await fetchGemini(apiUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -101,9 +146,10 @@ export const generateAIInsight = async (prompt, systemInstruction) => {
       ],
       generationConfig: {
         temperature: 0.7,
-        maxOutputTokens: 600,
+        maxOutputTokens: 400,
       },
     }),
+    signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -124,13 +170,13 @@ export const generateAIChatResponse = async (question, history, systemInstructio
 
   if (!apiKey) {
     return {
-      answers: 'Gemini API key is not configured on the backend server. Please set GEMINI_API_KEY in backend/.env to enable spending insights.',
+      answers: NO_PROVIDER_MESSAGE,
       isFallback: true,
     };
 
   }
 
-  const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+  const apiUrl = `${GEMINI_ENDPOINT}?key=${apiKey}`;
 
   // Cap history to last 6 turns to manage context size
   const formattedHistory = (history || []).slice(-6).map((h) => ({
@@ -138,7 +184,7 @@ export const generateAIChatResponse = async (question, history, systemInstructio
     parts: [{ text: h.text }],
   }));
 
-  const response = await fetch(apiUrl, {
+  const response = await fetchGemini(apiUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -151,9 +197,10 @@ export const generateAIChatResponse = async (question, history, systemInstructio
       ],
       generationConfig: {
         temperature: 0.7,
-        maxOutputTokens: 600,
+        maxOutputTokens: 400,
       },
     }),
+    signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -169,104 +216,43 @@ export const generateAIChatResponse = async (question, history, systemInstructio
   };
 };
 
-export const generateAIChatProposal = async ({
-  question,
-  history = [],
-  systemInstruction,
-  categories = [],
-}) => {
+const buildChatTools = () => toGeminiTools();
+
+const buildChatContents = (question, history, systemInstruction) => [
+  ...history.slice(-6).map((entry) => ({
+    role: entry.role === 'user' ? 'user' : 'model',
+    parts: [{ text: entry.text }],
+  })),
+  {
+    role: 'user',
+    parts: [{ text: `${systemInstruction}\n\nUser message: ${question}` }],
+  },
+];
+
+const geminiChatProposal = async ({ question, history = [], systemInstruction }) => {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return {
-      answers: 'Gemini API key is not configured on the backend server.',
+      answers: NO_PROVIDER_MESSAGE,
       isFallback: true,
     };
   }
 
-  const tools = [{
-    functionDeclarations: [
-      {
-        name: 'propose_expenses',
-        description: 'Draft one or more expenses for user confirmation. Never call for a question.',
-        parameters: {
-          type: 'OBJECT',
-          properties: {
-            items: {
-              type: 'ARRAY',
-              items: {
-                type: 'OBJECT',
-                properties: {
-                  amount: { type: 'NUMBER' },
-                  note: { type: 'STRING' },
-                  category: { type: 'STRING', enum: categories.length ? categories : ['Other'] },
-                  date: { type: 'STRING' },
-                  confidence: { type: 'NUMBER' },
-                },
-                required: ['amount'],
-              },
-            },
-          },
-          required: ['items'],
-        },
-      },
-      {
-        name: 'propose_bill',
-        description: 'Draft a bill or receipt for user confirmation. Never call for a question.',
-        parameters: {
-          type: 'OBJECT',
-          properties: {
-            vendor: { type: 'STRING' },
-            invoiceNumber: { type: 'STRING' },
-            issueDate: { type: 'STRING' },
-            dueDate: { type: 'STRING' },
-            currency: { type: 'STRING', enum: ['PKR', 'USD', 'EUR', 'GBP', 'INR'] },
-            items: { type: 'ARRAY', items: { type: 'OBJECT' } },
-            subtotal: { type: 'NUMBER' },
-            tax: { type: 'NUMBER' },
-            discount: { type: 'NUMBER' },
-            total: { type: 'NUMBER' },
-            suggestedCategory: { type: 'STRING', enum: categories.length ? categories : ['Other'] },
-            confidence: { type: 'NUMBER' },
-            warnings: { type: 'ARRAY', items: { type: 'STRING' } },
-          },
-          required: ['vendor', 'total'],
-        },
-      },
-      {
-        name: 'get_spending_summary',
-        description: 'Read-only summary request. Use this for questions about spending.',
-        parameters: {
-          type: 'OBJECT',
-          properties: {
-            from: { type: 'STRING' },
-            to: { type: 'STRING' },
-            category: { type: 'STRING' },
-          },
-        },
-      },
-    ],
-  }];
+  const tools = buildChatTools();
+  const contents = buildChatContents(question, history, systemInstruction);
 
-  const contents = [
-    ...history.slice(-6).map((entry) => ({
-      role: entry.role === 'user' ? 'user' : 'model',
-      parts: [{ text: entry.text }],
-    })),
-    {
-      role: 'user',
-      parts: [{ text: `${systemInstruction}\n\nUser message: ${question}` }],
-    },
-  ];
-
-  const response = await fetch(`${GEMINI_ENDPOINT}?key=${apiKey}`, {
+  const response = await fetchGemini(`${GEMINI_ENDPOINT}?key=${apiKey}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents,
       tools,
-      generationConfig: { temperature: 0.2, maxOutputTokens: 900 },
+      generationConfig: {
+        temperature: 0.2,
+        maxOutputTokens: 700,
+      },
     }),
-    signal: AbortSignal.timeout(60000),
+    signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
   });
 
   if (!response.ok) throw new Error(`Gemini API returned status ${response.status}`);
@@ -280,3 +266,39 @@ export const generateAIChatProposal = async ({
     isFallback: false,
   };
 };
+
+/**
+ * Runs a request through every provider that has a key, in order, and returns the
+ * first answer. A failure (quota, outage, unusable output) moves on to the next
+ * provider; only when all of them fail is the last error thrown. With no key at
+ * all, Gemini's own "not configured" reply is returned.
+ */
+const withProviders = (label, implementations) => async (...args) => {
+  const chain = configuredProviders();
+  if (chain.length === 0) return implementations.gemini(...args);
+
+  let lastError;
+  for (const name of chain) {
+    try {
+      return await implementations[name](...args);
+    } catch (err) {
+      lastError = err;
+      console.warn(`[ai] ${name} failed for ${label} (${err.message})${chain.at(-1) === name ? '' : ', trying the next provider'}`);
+    }
+  }
+  throw lastError;
+};
+
+export const generateAIInsight = withProviders('insight', {
+  gemini: geminiInsight,
+  claude: claudeInsight,
+  openai: (prompt, system) => compatInsight('openai', prompt, system),
+  groq: (prompt, system) => compatInsight('groq', prompt, system),
+});
+
+export const generateAIChatProposal = withProviders('chat', {
+  gemini: geminiChatProposal,
+  claude: claudeChat,
+  openai: (args) => compatChat('openai', args),
+  groq: (args) => compatChat('groq', args),
+});
