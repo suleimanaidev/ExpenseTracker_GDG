@@ -1,6 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { normalizeAmount, resolveRelativeDate } from '../utils/aiInput.js';
 import { validateExpenseProposal, validateBillProposal } from '../schemas/aiProposalSchema.js';
+import { generateAIChatProposal } from '../services/aiService.js';
+
+const originalGeminiKey = process.env.GEMINI_API_KEY;
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  if (originalGeminiKey === undefined) delete process.env.GEMINI_API_KEY;
+  else process.env.GEMINI_API_KEY = originalGeminiKey;
+});
 
 describe('AI input helpers', () => {
   it('normalizes common local amounts', () => {
@@ -35,5 +44,26 @@ describe('AI input helpers', () => {
       confidence: 0.8,
     }, ['Other']);
     expect(proposal.warnings.length).toBeGreaterThan(0);
+  });
+
+  it('sends chat proposals to the configured Gemini model endpoint', async () => {
+    process.env.GEMINI_API_KEY = 'test-key';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: 'Ready.' }] } }] }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await generateAIChatProposal({
+      question: 'How much did I spend?',
+      systemInstruction: 'Answer from the ledger.',
+      categories: ['Other'],
+    });
+
+    expect(result).toMatchObject({ answers: 'Ready.', isFallback: false });
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/models/gemini-3.5-flash-lite:generateContent?key=test-key'),
+      expect.objectContaining({ method: 'POST' })
+    );
   });
 });

@@ -1,13 +1,12 @@
+import 'dotenv/config';
+
 import fs from 'fs';
 import path from 'path';
-import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import { User } from '../models/User.js';
 import { Category } from '../models/Category.js';
 import { Expense } from '../models/Expense.js';
 import { amountToMinor } from '../utils/financeCalculations.js';
-
-dotenv.config();
 
 /**
  * Migration Script: Supabase (Postgres) -> MongoDB (Mongoose)

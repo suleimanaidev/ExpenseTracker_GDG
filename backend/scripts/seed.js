@@ -1,11 +1,10 @@
-import dotenv from 'dotenv';
+import 'dotenv/config';
+
 import mongoose from 'mongoose';
 import { User } from '../models/User.js';
 import { Category, DEFAULT_CATEGORIES } from '../models/Category.js';
 import { Expense } from '../models/Expense.js';
 import { amountToMinor } from '../utils/financeCalculations.js';
-
-dotenv.config();
 
 const mongoUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/ledger';
 

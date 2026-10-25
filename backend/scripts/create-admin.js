@@ -1,9 +1,8 @@
-import dotenv from 'dotenv';
+import 'dotenv/config';
+
 import mongoose from 'mongoose';
 import { connectDB } from '../config/db.js';
 import { User } from '../models/User.js';
-
-dotenv.config();
 
 const email = process.argv[2]?.trim().toLowerCase();
 

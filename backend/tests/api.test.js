@@ -6,11 +6,12 @@ import app from '../server.js';
 import { User } from '../models/User.js';
 import { Category } from '../models/Category.js';
 import { Expense } from '../models/Expense.js';
+import { PlatformSettings } from '../models/PlatformSettings.js';
 
 let mongoServer;
 
 beforeAll(async () => {
-  mongoServer = await MongoMemoryServer.create();
+  mongoServer = await MongoMemoryServer.create({ instance: { launchTimeout: 60_000 } });
   const uri = mongoServer.getUri();
   if (mongoose.connection.readyState !== 0) {
     await mongoose.disconnect();
@@ -26,9 +27,12 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await Expense.deleteMany({});
-  await Category.deleteMany({});
-  await User.deleteMany({});
+  await Promise.all([
+    Expense.deleteMany({}),
+    Category.deleteMany({}),
+    User.deleteMany({}),
+    PlatformSettings.deleteMany({}),
+  ]);
 });
 
 describe('Ledger MERN API Integration Tests', () => {
@@ -113,6 +117,18 @@ describe('Ledger MERN API Integration Tests', () => {
 
       const logoutRes = await request(app).post('/api/auth/logout');
       expect(logoutRes.status).toBe(200);
+    });
+
+    it('applies the platform default AI daily limit to new accounts', async () => {
+      await PlatformSettings.create({ key: 'default', defaultAiDailyLimit: 3 });
+
+      const res = await request(app).post('/api/auth/register').send({
+        email: 'ai-limit@ledger.app',
+        password: 'Password123!',
+      });
+
+      expect(res.status).toBe(201);
+      expect(res.body.user.aiDailyLimit).toBe(3);
     });
   });
 

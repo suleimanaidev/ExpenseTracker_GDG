@@ -6,7 +6,14 @@
  * leading bytes of its buffer, which is what is finally forwarded to Gemini.
  */
 
-export const MAX_BILL_BYTES = 8 * 1024 * 1024; // 8 MB
+export const MAX_BILL_BYTES = (() => {
+  const configured = Number.parseInt(process.env.MAX_UPLOAD_SIZE_BYTES, 10);
+  return Number.isFinite(configured) && configured > 0 ? configured : 8 * 1024 * 1024;
+})();
+
+/** Human-readable label for the active upload ceiling (e.g. "8 MB"). */
+export const formatByteLimit = (bytes = MAX_BILL_BYTES) =>
+  `${Math.round(bytes / (1024 * 1024))} MB`;
 
 /**
  * Accepted bill formats, keyed by the canonical MIME type we forward upstream.
@@ -102,7 +109,7 @@ export const validateBillBuffer = (buffer) => {
     return {
       ok: false,
       code: 'FILE_TOO_LARGE',
-      reason: `File is ${(size / (1024 * 1024)).toFixed(1)} MB. Maximum allowed size is 8 MB.`,
+      reason: `File is ${(size / (1024 * 1024)).toFixed(1)} MB. Maximum allowed size is ${formatByteLimit()}.`,
     };
   }
 
