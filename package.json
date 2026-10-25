@@ -9,6 +9,10 @@
     "dev:backend": "cd backend && npm run dev",
     "seed": "cd backend && npm run seed",
     "test": "cd backend && npm test",
-    "build": "cd frontend && npm run build"
+    "test:frontend": "cd frontend && npm test",
+    "lint": "cd frontend && npm run lint",
+    "format:check": "cd frontend && npm run format:check",
+    "build": "cd frontend && npm run build",
+    "check": "npm run lint && npm run format:check && npm run test:frontend && npm test && npm run build"
   }
 }
