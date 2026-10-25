@@ -123,7 +123,9 @@ export async function compatChat(name, { question, history = [], systemInstructi
   };
 }
 
-export const canReadMime = (name, mimeType) => mimeType !== 'application/pdf' || COMPAT[name].pdf;
+// Gemini and Claude read PDFs natively; of the OpenAI-compatible providers only some do.
+export const canReadMime = (name, mimeType) =>
+  mimeType !== 'application/pdf' || (COMPAT[name]?.pdf ?? true);
 
 const mediaPart = (buffer, mimeType) => {
   const dataUrl = `data:${mimeType};base64,${buffer.toString('base64')}`;
