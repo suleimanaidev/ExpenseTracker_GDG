@@ -1,7 +1,7 @@
 import { Category } from '../models/Category.js';
 import { auditBillArithmetic } from '../utils/billCalculations.js';
 import { parseBillScanResult } from '../schemas/billSchema.js';
-import { scanBillWithGemini } from '../services/billScanService.js';
+import { scanBillWithGemini, scanFailureStatus } from '../services/billScanService.js';
 import { recordAiUsage } from '../services/aiService.js';
 
 /**
@@ -70,18 +70,19 @@ export const scanBill = async (req, res, next) => {
     await recordAiUsage({
       user: req.user._id,
       type: 'scan',
-      success: Boolean(result.ok),
+      // A refusal means the model answered correctly; only real failures count
+      // against the success rate shown in the admin console.
+      success: Boolean(result.ok || result.rejected),
       latencyMs: Date.now() - startedAt,
     });
 
     if (!result.ok) {
-      const status = result.code === 'AI_NOT_CONFIGURED' ? 503 : 502;
-
       // `canEnterManually` lets the UI offer the manual creator instead of a
-      // dead end when the AI is down or unavailable.
-      return res.status(status).json({
+      // dead end when the AI is down or the file is not a bill.
+      return res.status(scanFailureStatus(result.code)).json({
         error: result.error,
         code: result.code,
+        ...(result.description ? { description: result.description } : {}),
         attempts: result.attempts ?? 0,
         canEnterManually: true,
       });

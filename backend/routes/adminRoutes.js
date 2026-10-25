@@ -8,6 +8,7 @@ import {
   getUserExpenses,
   updateUserStatus,
   updateUserRole,
+  unlockUser,
   resetUserPassword,
   deleteUser,
   getAiUsage,
@@ -61,6 +62,11 @@ router.patch(
     body: z.object({ suspended: z.boolean() }),
   }),
   updateUserStatus
+);
+router.post(
+  '/users/:userId/unlock',
+  validate({ params: z.object({ userId: objectId }), body: z.object({}).passthrough() }),
+  unlockUser
 );
 router.patch(
   '/users/:userId/role',

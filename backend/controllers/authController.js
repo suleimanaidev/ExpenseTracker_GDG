@@ -1,18 +1,27 @@
 import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
 import { User } from '../models/User.js';
 import { Category, DEFAULT_CATEGORIES } from '../models/Category.js';
 import {
   generateAccessToken,
   generateRefreshToken,
-  JWT_REFRESH_SECRET,
+  getRefreshTokenSecret,
 } from '../middleware/auth.js';
 import { PlatformSettings } from '../models/PlatformSettings.js';
 
-const COOKIE_OPTIONS = {
+// Built per call so NODE_ENV is read after environment loading, and so the
+// `secure` flag is accurate in production deployments.
+const cookieOptions = () => ({
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
   sameSite: 'lax',
   maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+});
+
+// Express clearCookie must receive matching cookie attributes, but not maxAge.
+const clearCookieOptions = () => {
+  const { httpOnly, secure, sameSite } = cookieOptions();
+  return { httpOnly, secure, sameSite };
 };
 
 export const register = async (req, res, next) => {
@@ -41,6 +50,11 @@ export const register = async (req, res, next) => {
       isAdmin: false,
       monthlyBudget: 50000,
       currency: 'PKR',
+      // The admin console's default only matters for accounts created after it
+      // changes; the env fallback keeps fresh installs predictable.
+      aiDailyLimit:
+        platformSettings?.defaultAiDailyLimit ??
+        (Number.parseInt(process.env.DEFAULT_AI_DAILY_LIMIT, 10) || 100),
     });
 
     // Sequential category seeding with rollback on failure
@@ -61,7 +75,7 @@ export const register = async (req, res, next) => {
     const accessToken = generateAccessToken(user);
     const refreshToken = generateRefreshToken(user);
 
-    res.cookie('refreshToken', refreshToken, COOKIE_OPTIONS);
+    res.cookie('refreshToken', refreshToken, cookieOptions());
 
     return res.status(201).json({
       user: user.toJSON(),
@@ -72,18 +86,59 @@ export const register = async (req, res, next) => {
   }
 };
 
+// A real bcrypt hash (cost 12) of a throwaway string. Unknown emails are compared
+// against it so they cost as much time as a wrong password: otherwise response
+// time would reveal which emails have accounts.
+const TIMING_DUMMY_HASH = '$2a$12$Kds1pkseHdxaJvKxeMZKv.PzoRh3BUrKOwU6j6bpimHO.kURXCCH2';
+
+const maxFailedLogins = () => Number.parseInt(process.env.MAX_FAILED_LOGINS, 10) || 10;
+const lockMinutes = () => Number.parseInt(process.env.LOGIN_LOCK_MINUTES, 10) || 15;
+
+const invalidCredentials = (res) => res.status(401).json({ error: 'Invalid email or password' });
+
+const lockedResponse = (res, lockUntil) => {
+  const seconds = Math.max(1, Math.ceil((lockUntil.getTime() - Date.now()) / 1000));
+  res.set('Retry-After', String(seconds));
+  return res.status(429).json({
+    error: 'Too many requests',
+    code: 'RATE_LIMITED',
+    retryAfterSeconds: seconds,
+  });
+};
+
 export const login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
 
     const user = await User.findOne({ email: email.toLowerCase() }).select('+passwordHash');
+
+    // Unknown email: same work, same answer as a wrong password.
     if (!user) {
-      return res.status(401).json({ error: 'Invalid email or password' });
+      await bcrypt.compare(password, TIMING_DUMMY_HASH);
+      return invalidCredentials(res);
+    }
+
+    // A locked account is refused before the password is looked at, so a correct
+    // guess during the lock reveals nothing. A dummy compare keeps the timing close.
+    if (user.lockUntil && user.lockUntil > new Date()) {
+      await bcrypt.compare(password, TIMING_DUMMY_HASH);
+      return lockedResponse(res, user.lockUntil);
     }
 
     const isMatch = await user.matchPassword(password);
     if (!isMatch) {
-      return res.status(401).json({ error: 'Invalid email or password' });
+      // Atomic, so parallel guesses cannot all read the same count and slip under the limit.
+      const updated = await User.findOneAndUpdate(
+        { _id: user._id },
+        { $inc: { failedLoginCount: 1 } },
+        { new: true }
+      );
+
+      if (updated && updated.failedLoginCount >= maxFailedLogins()) {
+        const lockUntil = new Date(Date.now() + lockMinutes() * 60 * 1000);
+        await User.updateOne({ _id: user._id }, { $set: { lockUntil, failedLoginCount: 0 } });
+      }
+      return invalidCredentials(res);
     }
 
     if (user.isSuspended) {
@@ -94,12 +149,14 @@ export const login = async (req, res, next) => {
     }
 
     user.lastLoginAt = new Date();
+    user.failedLoginCount = 0;
+    user.lockUntil = null;
     await user.save();
 
     const accessToken = generateAccessToken(user);
     const refreshToken = generateRefreshToken(user);
 
-    res.cookie('refreshToken', refreshToken, COOKIE_OPTIONS);
+    res.cookie('refreshToken', refreshToken, cookieOptions());
 
     return res.json({
       user: user.toJSON(),
@@ -109,13 +166,8 @@ export const login = async (req, res, next) => {
     next(err);
   }
 };
-
 export const logout = async (req, res) => {
-  res.clearCookie('refreshToken', {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-  });
+  res.clearCookie('refreshToken', clearCookieOptions());
   return res.json({ message: 'Successfully logged out' });
 };
 
@@ -132,7 +184,7 @@ export const refresh = async (req, res) => {
 
     let decoded;
     try {
-      decoded = jwt.verify(token, JWT_REFRESH_SECRET);
+      decoded = jwt.verify(token, getRefreshTokenSecret());
     } catch (jwtErr) {
       return res.status(401).json({
         error: 'Invalid or expired refresh token',
@@ -149,7 +201,7 @@ export const refresh = async (req, res) => {
     }
 
     if (user.isSuspended) {
-      res.clearCookie('refreshToken', COOKIE_OPTIONS);
+      res.clearCookie('refreshToken', clearCookieOptions());
       return res.status(403).json({
         error: 'This account is suspended. Please contact an administrator.',
         code: 'ACCOUNT_SUSPENDED',
@@ -159,7 +211,7 @@ export const refresh = async (req, res) => {
     const newAccessToken = generateAccessToken(user);
     const newRefreshToken = generateRefreshToken(user);
 
-    res.cookie('refreshToken', newRefreshToken, COOKIE_OPTIONS);
+    res.cookie('refreshToken', newRefreshToken, cookieOptions());
 
     return res.json({
       accessToken: newAccessToken,

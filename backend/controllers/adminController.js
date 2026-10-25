@@ -249,6 +249,19 @@ export const updateUserStatus = async (req, res, next) => {
   }
 };
 
+export const unlockUser = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.params.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    user.failedLoginCount = 0;
+    user.lockUntil = null;
+    await user.save();
+    await writeAuditLog({ actor: req.user._id, action: 'user.unlock', targetType: 'User', targetId: user._id, metadata: { email: user.email }, req });
+    return res.json({ user: user.toJSON() });
+  } catch (err) {
+    next(err);
+  }
+};
 export const updateUserRole = async (req, res, next) => {
   try {
     const user = await User.findById(req.params.userId);

@@ -298,10 +298,8 @@ export const buildBillPayload = async (userId, body, existing = null) => {
  * Two independent signals, because real invoices vary in which fields they
  * actually print:
  *
- *   - vendor + invoice number + the same total. The invoice number is the
- *     authoritative identity of an invoice, but vendors reuse numbers across
- *     years and issue credit notes against the same number, so a mismatched
- *     amount is treated as a genuinely different document.
+ *   - vendor + invoice number. The invoice number is authoritative, so changing
+ *     the amount cannot be used to save the same invoice twice.
  *   - vendor + total + issue date, which catches a re-upload of the same
  *     document when the invoice number was illegible and came back null.
  *
@@ -315,8 +313,7 @@ const findDuplicate = async ({ userId, vendor, invoiceNumber, totalMinor, issueD
     const byInvoice = await Bill.findOne({
       ...base,
       vendor: vendorPattern,
-      invoiceNumber,
-      totalMinor,
+      invoiceNumber: new RegExp(`^${escapeRegex(invoiceNumber)}$`, 'i'),
     });
     if (byInvoice) return byInvoice;
   }
@@ -371,27 +368,8 @@ const findByVendorAndInvoice = async (userId, vendor, invoiceNumber) => {
   });
 };
 
-/**
- * Whether a bill matches an existing one, honouring an explicit user override.
- *
- * The client sends `saveAnyway` only after showing the match and letting the user
- * choose to proceed, so consent has to be affirmative: only `true` and the
- * spellings a real control posts when it is genuinely ticked (`"true"`, `"on"`,
- * `"1"`) count.
- *
- * An unchecked HTML checkbox posts *nothing*, so an empty string is never a
- * legitimate "yes" — it is a blank text input, or a client that always sends the
- * field. Treating `''` as consent would silently disable duplicate detection for
- * every scanned bill, so an ambiguous value falls through to the normal check.
- * The failure mode is the safe one: the user re-submits instead of silently
- * gaining a duplicate.
- */
-const SAVE_AGREED_VALUES = new Set(['true', 'on', '1', 'yes']);
-
+/** Duplicate protection is mandatory for every client and cannot be bypassed. */
 const isDuplicate = async (req, bill) => {
-  const flag = req.body?.saveAnyway;
-  if (flag === true || SAVE_AGREED_VALUES.has(String(flag).trim().toLowerCase())) return false;
-
   return Boolean(
     await findDuplicate({
       userId: req.user._id,
@@ -472,7 +450,7 @@ export const createBill = async (req, res, next) => {
       return res.status(409).json({
         error: 'A matching bill already exists.',
         code: 'DUPLICATE_BILL',
-        // The client offers "Save anyway" or "Cancel" from this payload.
+        // The client uses this record to explain why the save was rejected.
         duplicate: (await findDuplicate({
           userId: req.user._id,
           vendor: bill.vendor,

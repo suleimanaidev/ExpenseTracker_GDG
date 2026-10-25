@@ -37,6 +37,17 @@ const userSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    // Consecutive failed sign-ins, and when the account may try again. Stored in
+    // MongoDB (not Redis) so a lockout survives restarts and cache loss.
+    failedLoginCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    lockUntil: {
+      type: Date,
+      default: null,
+    },
     passwordResetTokenHash: {
       type: String,
       select: false,
@@ -51,7 +62,7 @@ const userSchema = new mongoose.Schema(
       type: Number,
       min: 0,
       max: 10000,
-      default: 10,
+      default: 100,
     },
     monthlyBudget: {
       type: Number,
@@ -73,6 +84,8 @@ const userSchema = new mongoose.Schema(
         delete ret._id;
         delete ret.__v;
         delete ret.passwordHash;
+        delete ret.failedLoginCount;
+        delete ret.lockUntil;
         // Frontend compatibility aliases
         ret.full_name = ret.fullName;
         ret.monthly_budget = ret.monthlyBudget;

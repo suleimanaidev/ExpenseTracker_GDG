@@ -32,6 +32,9 @@ const bypassed = () =>
 class ResilientStore {
   constructor(name) {
     this.name = name;
+    // express-rate-limit's double-count check tells stores apart by this prefix; without
+    // it two limiters on the same IP would look like one limiter counting twice.
+    this.prefix = `${name}:`;
     this.memory = new MemoryStore();
     this.redisStore = null;
     this.options = null;
