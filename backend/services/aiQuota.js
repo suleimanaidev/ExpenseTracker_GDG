@@ -112,6 +112,23 @@ export async function reserveClaudeCall() {
   return reserve({ key: `claude:${day}`, scope: 'claude', day, limit: cap });
 }
 
+/** Today's AI usage and caps, for the admin System page. */
+export async function getAiQuotaSnapshot() {
+  const day = karachiDay();
+  const docs = await AiDailyCounter.find({ day }).select('scope count').lean();
+  const of = (scope) => docs.filter((doc) => doc.scope === scope);
+  const used = (scope) => of(scope).reduce((sum, doc) => sum + doc.count, 0);
+
+  return {
+    day,
+    timeZone: TIME_ZONE,
+    requestsToday: used('user'),
+    usersToday: of('user').length,
+    global: { used: used('global'), cap: capFromEnv('GLOBAL_AI_DAILY_CAP') },
+    claude: { used: used('claude'), cap: capFromEnv('CLAUDE_BACKUP_DAILY_CAP') },
+  };
+}
+
 export const BACKUP_CAP_MESSAGE =
   'The backup AI service has reached its daily limit. Please try again tomorrow, or enter the details manually.';
 

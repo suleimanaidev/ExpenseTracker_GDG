@@ -1,0 +1,66 @@
+/* Admin console: status chips and the System page. */
+
+.admin-chip {
+  display: inline-block;
+  padding: 3px 10px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.admin-chip--ok {
+  color: var(--gold);
+  background: var(--gold-dim);
+}
+
+.admin-chip--warn {
+  color: var(--warn, #a2650d);
+  background: color-mix(in srgb, var(--warn, #a2650d) 14%, transparent);
+}
+
+.admin-chip--bad {
+  color: var(--red, #c0392b);
+  background: color-mix(in srgb, var(--red, #c0392b) 14%, transparent);
+}
+
+.admin-chip--muted {
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text-muted) 14%, transparent);
+}
+
+.admin-system-grid {
+  display: grid;
+  align-items: start;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.admin-system-card {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.admin-system-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  font-size: 0.92rem;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+}
+
+.admin-system-row strong {
+  color: var(--text-primary);
+}
+
+.admin-system-note {
+  margin: 10px 0 0;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+}

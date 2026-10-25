@@ -14,7 +14,9 @@ import { getPlatformStats } from '../services/statsService.js';
 import { writeAuditLog } from '../services/auditService.js';
 import { deleteBillFile } from '../services/billStorageService.js';
 import { generateAIChatResponse } from '../services/aiService.js';
-import { pingRedis } from '../config/redis.js';
+import { isRedisReady, pingRedis } from '../config/redis.js';
+import { configuredProviders, providerOrder } from '../services/aiProviders.js';
+import { getAiQuotaSnapshot } from '../services/aiQuota.js';
 
 const statsCache = new Map();
 const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -63,6 +65,8 @@ const userMetricsPipeline = (match, sort, skip, limit) => [
             email: 1,
             isAdmin: 1,
             isSuspended: 1,
+            lockUntil: 1,
+            isLocked: { $gt: ['$lockUntil', '$$NOW'] },
             createdAt: 1,
             lastLoginAt: 1,
             monthlyBudget: 1,
@@ -536,6 +540,9 @@ export const getAdminHealth = async (req, res, next) => {
       databaseLatencyMs,
       redis,
       gemini: process.env.GEMINI_API_KEY ? 'configured' : 'not_configured',
+      providers: { configured: configuredProviders(), order: providerOrder() },
+      aiToday: await getAiQuotaSnapshot(),
+      rateLimiting: { store: isRedisReady() ? 'redis' : 'memory' },
       uptimeSeconds: Math.round(process.uptime()),
       nodeVersion: process.version,
       environment: process.env.NODE_ENV || 'development',

@@ -1,23 +1,36 @@
 import { NavLink, Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
+import { useSeo } from '../seo/useSeo';
 
 const items = [
   ['Overview', '/admin'],
   ['Users', '/admin/users'],
   ['Expenses', '/admin/expenses'],
+  ['Bills', '/admin/bills'],
   ['AI Usage', '/admin/ai-usage'],
+  ['Audit log', '/admin/audit-log'],
+  ['System', '/admin/system'],
   ['Settings', '/admin/settings'],
 ];
 
 export default function AdminLayout() {
   const { user, loading } = useAuth();
+  useSeo({ title: 'Admin | Ledger', noindex: true });
 
   if (loading) {
-    return <div className="flex-center min-h-screen"><div className="loading-spinner" /></div>;
+    return (
+      <div className="flex-center min-h-screen">
+        <div className="loading-spinner" />
+      </div>
+    );
   }
 
-  if (!user || !(user.isAdmin || user.is_admin)) {
-    return <Navigate to="/" replace />;
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (!(user.isAdmin || user.is_admin)) {
+    return <Navigate to="/overview" replace />;
   }
 
   return (
@@ -43,9 +56,13 @@ export default function AdminLayout() {
             </NavLink>
           ))}
         </nav>
-        <NavLink to="/" className="sidebar-link">Back to Ledger</NavLink>
+        <NavLink to="/overview" className="sidebar-link">
+          Back to Ledger
+        </NavLink>
       </aside>
-      <main className="main-content" id="main-content"><Outlet /></main>
+      <main className="main-content" id="main-content">
+        <Outlet />
+      </main>
     </div>
   );
 }
